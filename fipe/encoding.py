@@ -118,15 +118,9 @@ class FeatureEncoder:
         for c in self.columns:
             if self.data[c].nunique() == 2:
                 self.features[c] = FeatureType.BINARY
-                if self.data[c].dtype == "category":
-                    df = pd.get_dummies(self.data[c], drop_first=True)
-                    self.data.drop(columns=c, inplace=True)
-                    self.data[c] = df.iloc[:, 0]
-                else:
-                    values = self.data[c].unique()
-                    self.data.replace({
-                        c: {values[0]: 0, values[1]: 1}
-                    }, inplace=True)
+                df = pd.get_dummies(self.data[c], drop_first=True)
+                self.data.drop(columns=c, inplace=True)
+                self.data[c] = df.iloc[:, 0]
 
     def fit_numerical_features(self):
         # For each column in the data

@@ -130,3 +130,7 @@ class FIPEPruner:
         u = self.active_vars
         v = [u[e].X >= 0.5 for e in range(m)]
         return np.array(v)
+    
+
+class FIPEPrunerFull:
+    
