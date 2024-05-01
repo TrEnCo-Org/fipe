@@ -4,7 +4,7 @@ import pandas as pd
 
 from .typing import *
 
-class Encoder:
+class FeatureEncoder:
     """
     Encoder class for encoding data
     

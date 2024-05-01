@@ -1,4 +1,4 @@
-from .encoding import Encoder
+from .encoding import FeatureEncoder
 from .pruning import FIPEPruner
 
 from .typing import *
@@ -8,10 +8,9 @@ from ._predict import (
     predict
 )
 
-
 __all__ = [
     'FIPEPruner',
-    'Encoder',
+    'FeatureEncoder',
     'predict_single_proba',
     'predict_proba',
     'predict',
