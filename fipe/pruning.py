@@ -67,7 +67,7 @@ class FIPEPruner:
         # Add the objective function.
         # We want to minimize the number
         # of active trees: \sum_{e=1}^{m} u_e
-        gurobi_model.set_objective(
+        gurobi_model.setObjective(
             gp.quicksum(
                 self.active_vars[e]
                 for e in range(m)
