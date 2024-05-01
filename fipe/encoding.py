@@ -119,9 +119,8 @@ class FeatureEncoder:
             if self.data[c].nunique() == 2:
                 self.features[c] = FeatureType.BINARY
                 values = self.data[c].unique()
-                self.data[c].replace({
-                    values[0]: 0,
-                    values[1]: 1
+                self.data.replace({
+                    c: {values[0]: 0, values[1]: 1}
                 }, inplace=True)
 
     def fit_numerical_features(self):
