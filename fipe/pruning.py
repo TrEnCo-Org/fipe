@@ -15,7 +15,6 @@ import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-
 class BasePruner(ABC):
     @abstractmethod
     def prune(self):
