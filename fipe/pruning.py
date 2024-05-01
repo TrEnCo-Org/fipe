@@ -5,15 +5,15 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 
-import logging
-
 from ._predict import (
     predict_single_proba,
     predict
 )
 
+import logging
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.NullHandler())
 
 
 class BasePruner(ABC):
@@ -123,11 +123,11 @@ class FIPEPruner:
 
     @property
     def active(self):
+        m = len(self.E)
         if self.gurobi_model.SolCount == 0:
             logger.warning("When solving the FIPE problem, no solution was found.")
-            return []
+            return np.zeros(m, dtype=bool)
 
-        m = len(self.E)
         u = self.active_vars
         v = [u[e].X >= 0.5 for e in range(m)]
         return np.array(v)

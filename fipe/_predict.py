@@ -3,7 +3,7 @@ import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.NullHandler())
 
 def predict_single_proba_(e, X):
     """

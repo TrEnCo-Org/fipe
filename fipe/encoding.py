@@ -119,6 +119,7 @@ class FeatureEncoder:
             if self.data[c].nunique() == 2:
                 self.features[c] = FeatureType.BINARY
                 values = self.data[c].unique()
+                # TODO: do not use replace! Use map instead.
                 self.data.replace({
                     c: {values[0]: 0, values[1]: 1}
                 }, inplace=True)
