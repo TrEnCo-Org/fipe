@@ -9,6 +9,7 @@ from ._predict import (
     predict_single_proba,
     predict
 )
+from .encoding import FeatureEncoder
 
 import logging
 
@@ -24,45 +25,47 @@ class FIPEPruner:
     """
     FIPE: Functionally Identical Pruning for Ensemble models.
     
-    Parameters:
-    -----------
-    E: list
-        List of estimators in the ensemble.
-    w: list
-        List of weights for each estimator in E.
-        
-    Attributes:
-    -----------
-    E: list
-        List of estimators in the ensemble.
-    w: list
-        List of weights for each estimator in E.
-    gurobi_model: gp.Model
-        Gurobi model for the FIPE problem.
-    active_tree_vars: gp.tupledict[int, gp.Var]
-        Binary variables indicating whether the tree
-        corresponding to the estimator is active.
+    This class implements the FIPE algorithm for pruning ensemble models on finite subset of data.
+    
+    Parameters
+    ----------
+    E : list
+        List of ensemble models. Each model should have a `predict_proba` method that returns the probability of each class.
+    w : list of float
+        Weights of the ensemble models.
+
+    Attributes
+    ----------
+    ensemble_model :
+        The ensemble model.
+    weights :
+        The weights of the ensemble models.
+    gurobi_model :
+        The gurobi model for the FIPE problem.
+    active_vars :
+        The binary variables for the active classifiers.
     """
     gurobi_model: gp.Model
     active_vars: gp.tupledict[int, gp.Var]
-    
-    def __init__(self, E, w):
-        self.E = E
-        self.w = w
+    eps: float
+
+    def __init__(self, E, w, **kwargs):
+        self.ensemble_model = E
+        self.weights = np.array(w)
+        self.eps = kwargs.get("eps", 1.0)
+
 
     def build(self):
-        logger.debug("Building the gurobi model for FIPE.")
         gurobi_model = gp.Model("FIPE")
+        m = len(self.ensemble_model)
 
         self.active_vars = gurobi_model.addVars(
-            len(self.E),
-            vtype=GRB.BINARY,
+            m, vtype=GRB.BINARY,
             name="active_tree"
         )
-        logger.debug("Added binary variables for active classifiers.")
 
         # Number of estimators in the ensemble.
-        m = len(self.E)
+        m = len(self.ensemble_model)
         # Add the objective function.
         # We want to minimize the number
         # of active trees: \sum_{e=1}^{m} u_e
@@ -73,43 +76,31 @@ class FIPEPruner:
             ),
             GRB.MINIMIZE
         )
-        logger.debug("Added the objective function.")
-
-        # Add the constraint that at least one
-        # tree should be active.
-        # \sum_{e=1}^{m} u_e >= 1
-        gurobi_model.addConstr(
-            gp.quicksum(
-                self.active_vars[e]
-                for e in range(m)
-            ) >= 1,
-            name="at_least_one_active"
-        )
-        logger.debug("Added the constraint that at least one tree should be active.")
         self.gurobi_model = gurobi_model
         
 
     def add_constraints(self, X):
-        p = predict_single_proba(self.E, X)
-        y = predict(self.E, X, self.w)
+        p = predict_single_proba(self.ensemble_model, X)
+        y = predict(self.ensemble_model, X, self.weights)
         
         n = X.shape[0]
-        m = len(self.E)
+        m = len(self.ensemble_model)
         k = p.shape[-1]
-        
+        wm = self.weights.min()
         # Add the constraint that the predicted class
         # should be the same for the subset of active trees.
         for i in range(n):
             for j in range(k):
-                logger.debug(f"Adding constraint for class {j} and sample {i}.")
-                # \sum_{e=1}^{m} u_e * p[i, e, y[i]] >= \sum_{e=1}^{m} u_e * p[i, e, j]
+                if j == y[i]:
+                    continue
+                rhs = (0.0 if y[i] < j else self.eps * wm)
                 cons = self.gurobi_model.addConstr(
                     gp.quicksum(
-                        self.w[e]
+                        self.weights[e]
                         *(p[i, e, y[i]] - p[i, e, j])
                         *self.active_vars[e]
                         for e in range(m)
-                    ) >= 0.0,
+                    ) >= rhs,
                     name=f"sample_{i}_class_{j}"
                 )
                 cons.Lazy = 1
@@ -122,15 +113,20 @@ class FIPEPruner:
 
     @property
     def active(self):
-        m = len(self.E)
+        m = len(self.ensemble_model)
         if self.gurobi_model.SolCount == 0:
             logger.warning("When solving the FIPE problem, no solution was found.")
             return np.zeros(m, dtype=bool)
 
         u = self.active_vars
         v = [u[e].X >= 0.5 for e in range(m)]
-        return np.array(v)
-    
+        return np.array(v)   
+
+class FIPEOracle:
+    feature_encoder: FeatureEncoder
+    pass
 
 class FIPEPrunerFull:
+    base_pruner: FIPEPruner
+    oracle: FIPEOracle
     pass
