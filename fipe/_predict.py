@@ -43,7 +43,6 @@ def predict_single_proba(E, X):
     # We want to swap the axes to have the shape
     # (n_samples, n_estimators, n_classes).
     p = np.swapaxes(p, 0, 1)
-
     return p    
 
 def predict_proba(E, X, w):

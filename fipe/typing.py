@@ -4,6 +4,8 @@ numeric = int|float
 
 class FeatureType(Enum):
     CATEGORICAL = 1
-    NUMERICAL = 2
-    BINARY = 3
+    DISCRETE = 2
+    CONTINUOUS = 3
+    BINARY = 4
+    
     
