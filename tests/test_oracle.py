@@ -10,8 +10,6 @@ from sklearn.model_selection import train_test_split
 
 import logging
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 logging.basicConfig(level=logging.DEBUG)
 
 dataset = 'Breast-Cancer-Wisconsin'
