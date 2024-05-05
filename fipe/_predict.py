@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+
 def predict_single_proba_(e, X):
     """
     Predict the class probabilities of each sample in X
@@ -13,7 +14,7 @@ def predict_single_proba_(e, X):
     if X.ndim == 1:
         # If X is a single sample,
         # reshape it to a 2D array
-        # with a single row.    
+        # with a single row.
         X = X.reshape(1, -1)
 
     p = e.predict_proba(X)
@@ -23,6 +24,7 @@ def predict_single_proba_(e, X):
 
     return p
 
+
 def predict_single_proba(E, X):
     """
     Predict the class probabilities of each sample in X
@@ -31,7 +33,7 @@ def predict_single_proba(E, X):
     if X.ndim == 1:
         # If X is a single sample,
         # reshape it to a 2D array
-        # with a single row.    
+        # with a single row.
         X = X.reshape(1, -1)
 
     p = np.stack([
@@ -43,16 +45,18 @@ def predict_single_proba(E, X):
     # We want to swap the axes to have the shape
     # (n_samples, n_estimators, n_classes).
     p = np.swapaxes(p, 0, 1)
-    return p    
+    return p
+
 
 def predict_proba(E, X, w):
     """
-    Predict the class probabilities of each sample in X using
-    the model ensemble E.
+    Predict the score of each sample in X
+    according to the ensemble E.
     """
     w = np.array(w)
     p = predict_single_proba(E, X)
     return np.average(p, axis=1, weights=w)
+
 
 def predict(E, X, w):
     """
