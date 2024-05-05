@@ -18,7 +18,7 @@ class TestPredict(unittest.TestCase):
     x_0 = X[0]
     # Train random forest
     rf = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf.fit(X, y)
+    rf.fit(X, y)  # type: ignore
 
     def test_predict_single_proba(self):
         scores = predict_single_proba(self.rf, self.X)

@@ -4,8 +4,7 @@ from .pruning import (
     FIPEOracle,
     FIPEPrunerFull
 )
-
-from .typing import *
+from .typing import FeatureType
 from ._predict import (
     predict_single_proba,
     predict_proba,
@@ -23,4 +22,5 @@ __all__ = [
     'predict_single_proba',
     'predict_proba',
     'predict',
+    'FeatureType',
 ]

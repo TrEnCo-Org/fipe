@@ -2,17 +2,21 @@ from copy import deepcopy
 
 import pandas as pd
 
-from .typing import *
+from .typing import (
+    FeatureType,
+    numeric
+)
+
 
 class FeatureEncoder:
     """
     Encoder class for encoding data
-    
+
     Attributes:
     -----------
     features: dict[str, FeatureType]
         Dictionary of features and their types.
-    
+
     upper_bounds: dict[str, numeric]
         Dictionary of upper bounds for numerical features.
 
@@ -40,8 +44,8 @@ class FeatureEncoder:
 
     columns: list[str]
     X: pd.DataFrame
-    
-    INF=1
+
+    INF = 1
 
     def __init__(self) -> None:
         pass
@@ -106,17 +110,17 @@ class FeatureEncoder:
         discrete_features: set[str] | None = None,
     ) -> None:
         self.data = deepcopy(X)
-        
+
         self.clean_data()
 
-        self.columns = self.data.columns
+        self.columns = list(self.data.columns)
         self.features = dict()
         self.upper_bounds = dict()
         self.lower_bounds = dict()
         self.values = dict()
         self.categories = dict()
         self.inverse_categories = dict()
-        
+
         self.fit_binary_features()
         self.fit_discrete_features(discrete_features)
         self.fit_continuous_features()
@@ -128,13 +132,11 @@ class FeatureEncoder:
     def clean_data(self) -> None:
         # Drop missing values
         self.data = self.data.dropna()
-        
         # Drop columns with only one unique value
         b = self.data.nunique() > 1
         self.data = self.data.loc[:, b]
-        
+
     def fit_binary_features(self):
-        
         # For each column in the data
         # if the number of unique values is 2
         # then the feature is binary.
@@ -150,7 +152,6 @@ class FeatureEncoder:
         for c in self.columns:
             if c in self.features:
                 continue
-            
             if discrete_features is not None and c in discrete_features:
                 x = pd.to_numeric(self.data[c], errors="coerce")
                 if x.notnull().all():
@@ -158,7 +159,7 @@ class FeatureEncoder:
                     self.data[c] = x
                     values = x.unique()
                     values.sort()
-                    self.values[c] = values
+                    self.values[c] = list(values)
 
     def fit_continuous_features(self):
         # For each column in the data
@@ -190,7 +191,6 @@ class FeatureEncoder:
         # is categorical. Store the categories and
         # the inverse categories. Replace the column
         # with the encoded columns.
-        
         for c in self.columns:
             if c in self.features:
                 continue
@@ -200,9 +200,7 @@ class FeatureEncoder:
             self.categories[c] = list(df.columns)
             for v in self.categories[c]:
                 self.inverse_categories[v] = c
-            
             # Drop the original column
             self.data.drop(columns=c, inplace=True)
-            
             # Add the encoded columns
             self.data = pd.concat([self.data, df], axis=1)
