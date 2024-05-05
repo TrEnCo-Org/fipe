@@ -24,7 +24,7 @@ class TestFeatureEncoder(unittest.TestCase):
         self.assertEqual(encoder.numerical_features, self.true_features)
 
         # - Test 2: discrete features -
-        encoder.fit(self.data, discrete_features=self.true_features)
+        encoder.fit(self.data, discrete_features=set(self.true_features))
         self.assertEqual(encoder.n_features, 9)
         self.assertEqual(encoder.binary_features, [])
         self.assertEqual(encoder.categorical_features, [])

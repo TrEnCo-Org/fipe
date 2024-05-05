@@ -167,6 +167,8 @@ class FIPEPrunerFull(BasePruner):
                 self.pruner.prune()
 
             if np.isclose(active, self.pruner.active).all():
+                msg = "Pruner was not able to find a new solution."
+                logger.warning(msg)
                 break
 
             active = deepcopy(self.pruner.active)
