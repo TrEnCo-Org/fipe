@@ -2,6 +2,8 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
+from sklearn.tree import _tree
+
 from .encoding import FeatureEncoder
 
 import warnings
@@ -11,6 +13,7 @@ Node = int
 
 
 class Tree(Iterable[Node]):
+    tree: _tree.Tree
     root: Node
     n_nodes: int
     max_depth: int
@@ -23,17 +26,18 @@ class Tree(Iterable[Node]):
     threshold: dict[Node, float]
     category: dict[Node, str]
     prob: dict[Node, np.ndarray]
+    n_samples: dict[Node, int]
 
     def __init__(
         self,
-        tree,
+        tree: _tree.Tree,
         feature_encoder: FeatureEncoder
     ):
         self.tree = tree
 
         self.root = 0
         self.n_nodes = tree.node_count
-        self.max_depth = tree.max_depth
+        self.max_depth = tree.max_depth  # type: ignore
         self.internal_nodes = set()
         self.leaves = set()
         self.node_depth = dict()
@@ -52,11 +56,9 @@ class Tree(Iterable[Node]):
         with_leaves: bool = False
     ) -> set[Node]:
         def fn(n):
-            if not (self.node_depth[n] == d):
-                return False
-            is_leaf = (n in self.leaves)
-            return with_leaves or not is_leaf
-        return set(filter(fn, self))
+            return self.node_depth[n] == d
+        nodes = (self if with_leaves else self.internal_nodes)
+        return set(filter(fn, nodes))
 
     def node_split_on(
         self,
@@ -77,35 +79,38 @@ class Tree(Iterable[Node]):
         tree,
         feature_encoder: FeatureEncoder
     ):
-        def dfs(n, d):
-            self.node_depth[n] = d
-            left = tree.children_left[n]
-            right = tree.children_right[n]
+        def dfs(node, depth):
+            self.node_depth[node] = depth
+            left = tree.children_left[node]
+            right = tree.children_right[node]
             if left == right:
-                self.leaves.add(n)
-                v = tree.value[n].flatten()
+                self.leaves.add(node)
+                v = tree.value[node].flatten()
                 p = v / v.sum()
                 # This is for hard voting.
                 q = np.argmax(p)
-                self.prob[n] = np.eye(p.shape[0])[q]
+                k = p.shape[0]
+                self.prob[node] = np.eye(k)[q]
+                self.n_samples[node] = tree.n_node_samples[node]
                 return
             else:
-                fi: int = tree.feature[n]
-                f: str = feature_encoder.columns[fi]
+                i: int = tree.feature[node]
+                f: str = feature_encoder.columns[i]
 
                 if f in feature_encoder.inverse_categories:
-                    self.category[n] = f
+                    self.category[node] = f
                     f = feature_encoder.inverse_categories[f]
 
-                self.feature[n] = f
+                self.feature[node] = f
 
                 if f in feature_encoder.numerical_features:
-                    self.threshold[n] = tree.threshold[n]
+                    self.threshold[node] = tree.threshold[node]
 
-                self.left[n], self.right[n] = left, right
-                self.internal_nodes.add(n)
-                dfs(left, d + 1)
-                dfs(right, d + 1)
+                self.left[node] = left
+                self.right[node] = right
+                self.internal_nodes.add(node)
+                dfs(left, depth + 1)
+                dfs(right, depth + 1)
         dfs(self.root, 0)
 
 
