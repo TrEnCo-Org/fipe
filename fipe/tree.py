@@ -90,8 +90,8 @@ class Tree(Iterable[Node]):
                 self.prob[n] = np.eye(p.shape[0])[q]
                 return
             else:
-                f = tree.feature[n]
-                f: str = feature_encoder.columns[f]
+                fi: int = tree.feature[n]
+                f: str = feature_encoder.columns[fi]
 
                 if f in feature_encoder.inverse_categories:
                     self.category[n] = f
@@ -110,8 +110,6 @@ class Tree(Iterable[Node]):
 
 
 class TreeEnsemble(Iterable[Tree]):
-    n_trees: int
-    n_classes: int
     trees: list[Tree]
     numerical_levels: dict[str, list[float]]
     tol: float

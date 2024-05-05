@@ -113,7 +113,7 @@ class FeatureEncoder:
 
         self.clean_data()
 
-        self.columns = self.data.columns
+        self.columns = list(self.data.columns)
         self.features = dict()
         self.upper_bounds = dict()
         self.lower_bounds = dict()
@@ -159,7 +159,7 @@ class FeatureEncoder:
                     self.data[c] = x
                     values = x.unique()
                     values.sort()
-                    self.values[c] = values
+                    self.values[c] = list(values)
 
     def fit_continuous_features(self):
         # For each column in the data
