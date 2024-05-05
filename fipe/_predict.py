@@ -14,7 +14,7 @@ def predict_single_proba_(e, X):
     if X.ndim == 1:
         # If X is a single sample,
         # reshape it to a 2D array
-        # with a single row.    
+        # with a single row.
         X = X.reshape(1, -1)
 
     p = e.predict_proba(X)
@@ -33,7 +33,7 @@ def predict_single_proba(E, X):
     if X.ndim == 1:
         # If X is a single sample,
         # reshape it to a 2D array
-        # with a single row.    
+        # with a single row.
         X = X.reshape(1, -1)
 
     p = np.stack([
@@ -50,8 +50,8 @@ def predict_single_proba(E, X):
 
 def predict_proba(E, X, w):
     """
-    Predict the class probabilities of each sample in X using
-    the model ensemble E.
+    Predict the score of each sample in X
+    according to the ensemble E.
     """
     w = np.array(w)
     p = predict_single_proba(E, X)
