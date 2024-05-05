@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 import unittest
 
@@ -23,13 +23,21 @@ class TestOracle(unittest.TestCase):
     rf = RandomForestClassifier(n_estimators=100, random_state=42)
     rf.fit(X_train, y_train)
 
+    # Train isolation forest
+    ilf = IsolationForest(n_estimators=50, contamination=0.1)
+    ilf.fit(X_train)
+
     def test_oracle_fails_with_all_active(self):
-        w = np.ones(len(self.rf))
+        weights = np.ones(len(self.rf))
         tree_ensemble = TreeEnsemble(self.rf, self.encoder)
+        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder)
         # Build oracle
         oracle = FIPEOracle(self.encoder,
-                            tree_ensemble=tree_ensemble,
-                            weights=w)
+                            tree_ensemble,
+                            isolation_ensemble,
+                            weights,
+                            self.ilf.max_samples_,
+                            self.ilf.offset_)
         oracle.build()
         # Separate with all trees selected
         active_trees = np.ones(len(self.rf))
@@ -37,12 +45,16 @@ class TestOracle(unittest.TestCase):
         self.assertTrue(len(X) == 0)
 
     def test_oracle_succeeds_with_single_tree(self):
-        w = np.ones(len(self.rf))
+        weights = np.ones(len(self.rf))
         tree_ensemble = TreeEnsemble(self.rf, self.encoder)
+        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder)
         # Build oracle
         oracle = FIPEOracle(self.encoder,
-                            tree_ensemble=tree_ensemble,
-                            weights=w)
+                            tree_ensemble,
+                            isolation_ensemble,
+                            weights,
+                            self.ilf.max_samples_,
+                            self.ilf.offset_)
         oracle.build()
         # Separate with all trees selected
         active_trees = np.zeros(len(self.rf))

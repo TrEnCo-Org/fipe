@@ -47,6 +47,7 @@ class Tree(Iterable[Node]):
         self.threshold = dict()
         self.category = dict()
         self.prob = dict()
+        self.n_samples = dict()
 
         self.parse_tree(tree, feature_encoder)
 

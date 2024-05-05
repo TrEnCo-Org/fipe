@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 import unittest
 
@@ -50,9 +50,15 @@ class TestFullPruner(unittest.TestCase):
     rf = RandomForestClassifier(n_estimators=20, random_state=42)
     rf.fit(X_train, y_train)
 
+    # Train isolation forest
+    ilf = IsolationForest(n_estimators=50, contamination=0.1)
+    ilf.fit(X_train)
+
     def test_prune(self):
         w = np.ones(len(self.rf))
-        full_pruner = FIPEPrunerFull(self.rf, w, self.encoder, max_iter=3)
+        full_pruner = FIPEPrunerFull(self.rf, w,
+                                     self.ilf, self.encoder,
+                                     max_iter=3)
         full_pruner.build()
         full_pruner.add_points(self.X_test)
         full_pruner.prune()
