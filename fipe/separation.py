@@ -6,14 +6,831 @@ import pandas as pd
 import gurobipy as gp
 from gurobipy import GRB
 
+from sklearn.ensemble._iforest import _average_path_length  # type: ignore
+
 from .tree import TreeEnsemble
 from .encoding import FeatureEncoder
 from ._predict import predict_proba
+from .typing import numeric
 
 import logging
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
+
+
+def add_tree_ensemble_flow_vars(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    name: str = "flow"
+):
+    for t, tree in enumerate(tree_ensemble):
+        for n in tree:
+            var = model.addVar(
+                vtype=GRB.CONTINUOUS,
+                lb=0.0,
+                ub=1.0,
+                name=f"{name}_{t}_{n}"
+            )
+            flow_vars[t, n] = var
+
+
+def add_tree_ensemble_branch_vars(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    branch_vars: gp.tupledict[tuple[int, int], gp.Var],
+    name: str = "branch"
+):
+    for t, tree in enumerate(tree_ensemble):
+        for d in range(tree.max_depth):
+            var = model.addVar(
+                vtype=GRB.BINARY,
+                name=f"{name}_{t}_{d}"
+            )
+            branch_vars[t, d] = var
+
+
+def add_tree_ensemble_root_constraints(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    root_constraints: gp.tupledict[int, gp.Constr],
+    name: str = "root"
+):
+    for t, tree in enumerate(tree_ensemble):
+        root = tree.root
+        cons = model.addConstr(
+            flow_vars[t, root] == 1.0,
+            name=f"{name}_{t}"
+        )
+        root_constraints[t] = cons
+
+
+def add_tree_ensemble_flow_constraints(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    flow_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    name: str = "flow"
+):
+    for t, tree in enumerate(tree_ensemble):
+        for n in tree.internal_nodes:
+            left = tree.left[n]
+            right = tree.right[n]
+            cons = model.addConstr(
+                flow_vars[t, left] + flow_vars[t, right]
+                == flow_vars[t, n],
+                name=f"{name}_{t}_{n}"
+            )
+            flow_constraints[t, n] = cons
+
+
+def add_tree_ensemble_branch_constraints(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    branch_vars: gp.tupledict[tuple[int, int], gp.Var],
+    branch_to_left_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    branch_to_right_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    name: str = "branch"
+):
+    for t, tree in enumerate(tree_ensemble):
+        for n in tree.internal_nodes:
+            d = tree.node_depth[n]
+            left = tree.left[n]
+            right = tree.right[n]
+            cons = model.addConstr(
+                flow_vars[t, left] <= branch_vars[t, d],
+                name=f"{name}_to_left_{t}_{n}"
+            )
+            branch_to_left_constraints[t, n] = cons
+            cons = model.addConstr(
+                flow_vars[t, right] <= 1 - branch_vars[t, d],
+                name=f"{name}_to_right_{t}_{n}"
+            )
+            branch_to_right_constraints[t, n] = cons
+
+
+def add_tree_ensemble_vars_and_constraints(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    branch_vars: gp.tupledict[tuple[int, int], gp.Var],
+    root_constraints: gp.tupledict[int, gp.Constr],
+    flow_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    branch_to_left_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    branch_to_right_constraints: gp.tupledict[tuple[int, int], gp.Constr],
+    prefix: str = "",
+    prefix_sep: str = "_"
+):
+    add_tree_ensemble_flow_vars(
+        model, tree_ensemble, flow_vars, name=f"{prefix}{prefix_sep}flow"
+    )
+    add_tree_ensemble_branch_vars(
+        model, tree_ensemble, branch_vars, name=f"{prefix}{prefix_sep}branch"
+    )
+    add_tree_ensemble_root_constraints(
+        model, tree_ensemble, flow_vars, root_constraints,
+        name=f"{prefix}{prefix_sep}root"
+    )
+    add_tree_ensemble_flow_constraints(
+        model, tree_ensemble, flow_vars, flow_constraints,
+        name=f"{prefix}{prefix_sep}flow"
+    )
+    add_tree_ensemble_branch_constraints(
+        model, tree_ensemble, flow_vars, branch_vars,
+        branch_to_left_constraints, branch_to_right_constraints,
+        name=f"{prefix}{prefix_sep}branch"
+    )
+
+
+def add_feature_binary_vars(
+    model: gp.Model,
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    name: str = "binary"
+):
+    for f in binary_features:
+        var = model.addVar(
+            vtype=GRB.BINARY,
+            name=f"{name}_{f}"
+        )
+        binary_vars[f] = var
+
+
+def add_feature_discrete_vars(
+    model: gp.Model,
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    name: str = "discrete"
+):
+    for f in discrete_features:
+        n = len(discrete_values[f])
+        for v in range(n):
+            var = model.addVar(
+                vtype=GRB.CONTINUOUS,
+                lb=0.0,
+                ub=1.0,
+                name=f"{name}_{f}_{v}"
+            )
+            discrete_vars[f, v] = var
+
+
+def add_feature_continuous_vars(
+    model: gp.Model,
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    name: str = "continuous"
+):
+    for f in continuous_features:
+        n = len(continuous_levels[f]) - 1
+        for i in range(n):
+            var = model.addVar(
+                vtype=GRB.CONTINUOUS,
+                lb=0.0,
+                ub=1.0,
+                name=f"{name}_{f}_{i}"
+            )
+            continuous_vars[f, i] = var
+
+
+def add_feature_categorical_vars(
+    model: gp.Model,
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    name: str = "categorical"
+):
+    for f in categorical_features:
+        for c in categorical_categories[f]:
+            var = model.addVar(
+                vtype=GRB.BINARY,
+                name=f"{name}_{c}"
+            )
+            categorical_vars[c] = var
+
+
+def add_feature_binary_left_constraints(
+    model: gp.Model,
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    binary_left_constraints: gp.tupledict[tuple[str, int, int], gp.Constr],
+    name: str = "binary_left"
+):
+    for f in binary_features:
+        for t, tree in enumerate(tree_ensemble):
+            for n in tree.node_split_on(f):
+                left = tree.left[n]
+                cons = model.addConstr(
+                    binary_vars[f] <= 1 - flow_vars[t, left],
+                    name=f"{name}_{f}_{t}_{n}"
+                )
+                binary_left_constraints[f, t, n] = cons
+
+
+def add_feature_binary_right_constraints(
+    model: gp.Model,
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    binary_right_constraints: gp.tupledict[tuple[str, int, int], gp.Constr],
+    name: str = "binary_right"
+):
+    for f in binary_features:
+        for t, tree in enumerate(tree_ensemble):
+            for n in tree.node_split_on(f):
+                right = tree.right[n]
+                cons = model.addConstr(
+                    binary_vars[f] >= flow_vars[t, right],
+                    name=f"{name}_{f}_{t}_{n}"
+                )
+                binary_right_constraints[f, t, n] = cons
+
+
+def add_feature_binary_constraints(
+    model: gp.Model,
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    binary_left_constraints: gp.tupledict[tuple[str, int, int], gp.Constr],
+    binary_right_constraints: gp.tupledict[tuple[str, int, int], gp.Constr],
+    prefix: str = "binary",
+    prefix_sep: str = "_"
+):
+    add_feature_binary_left_constraints(
+        model, binary_features, binary_vars, tree_ensemble,
+        flow_vars, binary_left_constraints,
+        name=f"{prefix}{prefix_sep}left"
+    )
+    add_feature_binary_right_constraints(
+        model, binary_features, binary_vars, tree_ensemble,
+        flow_vars, binary_right_constraints,
+        name=f"{prefix}{prefix_sep}right"
+    )
+
+
+def add_feature_discrete_left_constraints(
+    model: gp.Model,
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    discrete_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    name: str = "discrete_left"
+):
+    for f in discrete_features:
+        values = discrete_values[f]
+        for i, v in enumerate(values):
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    if v == tree.threshold[n]:
+                        left = tree.left[n]
+                        cons = model.addConstr(
+                            discrete_vars[f, i]
+                            <= 1 - flow_vars[t, left],
+                            name=f"{name}_{f}_{i}_{t}_{n}"
+                        )
+                        discrete_left_constraints[f, i, t, n] = cons
+
+
+def add_feature_discrete_right_constraints(
+    model: gp.Model,
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    discrete_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    name: str = "discrete_right"
+):
+    for f in discrete_features:
+        values = discrete_values[f]
+        for i, v in enumerate(values):
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    if v == tree.threshold[n]:
+                        right = tree.right[n]
+                        cons = model.addConstr(
+                            discrete_vars[f, i]
+                            >= flow_vars[t, right],
+                            name=f"{name}_{f}_{i}_{t}_{n}"
+                        )
+                        discrete_right_constraints[f, i, t, n] = cons
+
+
+def add_feature_discrete_logical_constraints(
+    model: gp.Model,
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    discrete_logical_constraints: gp.tupledict[tuple[str, int], gp.Constr],
+    name: str = "discrete_logical"
+):
+    for f in discrete_features:
+        n = len(discrete_values[f])
+        for i in range(n):
+            if i == 0:
+                cons = model.addConstr(
+                    discrete_vars[f, i] == 1.0,
+                    name=f"{name}_{f}_{i}"
+                )
+                discrete_logical_constraints[f, i] = cons
+            else:
+                cons = model.addConstr(
+                    discrete_vars[f, i]
+                    <= discrete_vars[f, i-1],
+                    name=f"{name}_{f}_{i}"
+                )
+                discrete_logical_constraints[f, i] = cons
+
+
+def add_feature_discrete_constraints(
+    model: gp.Model,
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    discrete_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    discrete_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    discrete_logical_constraints: gp.tupledict[
+        tuple[str, int], gp.Constr],
+    prefix: str = "discrete",
+    prefix_sep: str = "_"
+):
+    add_feature_discrete_left_constraints(
+        model, discrete_features, discrete_values, discrete_vars,
+        tree_ensemble, flow_vars, discrete_left_constraints,
+        name=f"{prefix}{prefix_sep}left"
+    )
+    add_feature_discrete_right_constraints(
+        model, discrete_features, discrete_values, discrete_vars,
+        tree_ensemble, flow_vars, discrete_right_constraints,
+        name=f"{prefix}{prefix_sep}right"
+    )
+    add_feature_discrete_logical_constraints(
+        model, discrete_features, discrete_values, discrete_vars,
+        discrete_logical_constraints,
+        name=f"{prefix}{prefix_sep}logical"
+    )
+
+
+def add_feature_continuous_left_constraints(
+    model: gp.Model,
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    continuous_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    name: str = "continuous_left"
+):
+    for f in continuous_features:
+        levels = continuous_levels[f]
+        for i, v in enumerate(levels[:-1]):
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    if v == tree.threshold[n]:
+                        left = tree.left[n]
+                        cons = model.addConstr(
+                            continuous_vars[f, i]
+                            <= 1 - flow_vars[t, left],
+                            name=f"{name}_{f}_{i}_{t}_{n}"
+                        )
+                        continuous_left_constraints[f, i, t, n] = cons
+
+
+def add_feature_continuous_right_constraints(
+    model: gp.Model,
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    continuous_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    name: str = "continuous_right"
+):
+    for f in continuous_features:
+        levels = continuous_levels[f]
+        for i, v in enumerate(levels[:-1]):
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    if v == tree.threshold[n]:
+                        right = tree.right[n]
+                        cons = model.addConstr(
+                            continuous_vars[f, i]
+                            >= flow_vars[t, right],
+                            name=f"{name}_{f}_{i}_{t}_{n}"
+                        )
+                        continuous_right_constraints[f, i, t, n] = cons
+
+
+def add_feature_continuous_logical_constraints(
+    model: gp.Model,
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    continuous_logical_constraints: gp.tupledict[tuple[str, int], gp.Constr],
+    name: str = "continuous_logical"
+):
+    for f in continuous_features:
+        levels = continuous_levels[f]
+        n = len(levels) - 1
+        for i in range(n):
+            if i == 0:
+                cons = model.addConstr(
+                    continuous_vars[f, i] == 1.0,
+                    name=f"{name}_{f}_{i}"
+                )
+                continuous_logical_constraints[f, i] = cons
+            else:
+                cons = model.addConstr(
+                    continuous_vars[f, i]
+                    <= continuous_vars[f, i-1],
+                    name=f"{name}_{f}_{i}"
+                )
+                continuous_logical_constraints[f, i] = cons
+
+
+def add_feature_continuous_constraints(
+    model: gp.Model,
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    continuous_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    continuous_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr],
+    continuous_logical_constraints: gp.tupledict[
+        tuple[str, int], gp.Constr],
+    prefix: str = "continuous",
+    prefix_sep: str = "_"
+):
+    add_feature_continuous_left_constraints(
+        model, continuous_features, continuous_levels, continuous_vars,
+        tree_ensemble, flow_vars, continuous_left_constraints,
+        name=f"{prefix}{prefix_sep}left"
+    )
+    add_feature_continuous_right_constraints(
+        model, continuous_features, continuous_levels, continuous_vars,
+        tree_ensemble, flow_vars, continuous_right_constraints,
+        name=f"{prefix}{prefix_sep}right"
+    )
+    add_feature_continuous_logical_constraints(
+        model, continuous_features, continuous_levels, continuous_vars,
+        continuous_logical_constraints,
+        name=f"{prefix}{prefix_sep}logical"
+    )
+
+
+def add_feature_categorical_left_constraints(
+    model: gp.Model,
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    categorical_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr],
+    name: str = "categorical_left"
+):
+    for f in categorical_features:
+        for c in categorical_categories[f]:
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    left = tree.left[n]
+                    cons = model.addConstr(
+                        categorical_vars[c]
+                        <= 1 - flow_vars[t, left],
+                        name=f"{name}_{f}_{c}_{t}_{n}"
+                    )
+                    categorical_left_constraints[c, t, n] = cons
+
+
+def add_feature_categorical_right_constraints(
+    model: gp.Model,
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    categorical_right_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr],
+    name: str = "categorical_right"
+):
+    for f in categorical_features:
+        for c in categorical_categories[f]:
+            for t, tree in enumerate(tree_ensemble):
+                for n in tree.node_split_on(f):
+                    right = tree.right[n]
+                    cons = model.addConstr(
+                        categorical_vars[c]
+                        >= flow_vars[t, right],
+                        name=f"{name}_{f}_{c}_{t}_{n}"
+                    )
+                    categorical_right_constraints[c, t, n] = cons
+
+
+def add_feature_categorical_logical_constraints(
+    model: gp.Model,
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    categorical_logical_constraints: gp.tupledict[str, gp.Constr],
+    name: str = "categorical_logical"
+):
+    for f in categorical_features:
+        for c in categorical_categories[f]:
+            cons = model.addConstr(
+                categorical_vars[c] == 1.0,
+                name=f"{name}_{c}"
+            )
+            categorical_logical_constraints[c] = cons
+
+
+def add_feature_categorical_constraints(
+    model: gp.Model,
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    categorical_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr],
+    categorical_right_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr],
+    categorical_logical_constraints: gp.tupledict[str, gp.Constr],
+    prefix: str = "categorical",
+    prefix_sep: str = "_"
+):
+    add_feature_categorical_left_constraints(
+        model, categorical_features, categorical_categories, categorical_vars,
+        tree_ensemble, flow_vars, categorical_left_constraints,
+        name=f"{prefix}{prefix_sep}left"
+    )
+    add_feature_categorical_right_constraints(
+        model, categorical_features, categorical_categories, categorical_vars,
+        tree_ensemble, flow_vars, categorical_right_constraints,
+        name=f"{prefix}{prefix_sep}right"
+    )
+    add_feature_categorical_logical_constraints(
+        model, categorical_features, categorical_categories, categorical_vars,
+        categorical_logical_constraints,
+        name=f"{prefix}{prefix_sep}logical"
+    )
+
+
+def add_prob_vars(
+    model: gp.Model,
+    prob_vars: gp.tupledict[int, gp.Var],
+    classes: int | list[int],
+    name: str = "prob"
+):
+    if isinstance(classes, int):
+        classes = [classes]
+    for c in classes:
+        var = model.addVar(
+            vtype=GRB.CONTINUOUS,
+            lb=0.0,
+            ub=1.0,
+            name=f"{name}_{c}"
+        )
+        prob_vars[c] = var
+
+
+def build_weighted_prob_expr(
+    tree_ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    weights: np.ndarray,
+    c: int
+):
+    return gp.quicksum(
+        weights[t]
+        * tree.prob[n][c]
+        * flow_vars[t, n]
+        for t, tree in enumerate(tree_ensemble)
+        for n in tree.leaves
+    )
+
+
+def add_prob_constraints(
+    model: gp.Model,
+    tree_ensemble: TreeEnsemble,
+    classes: int | list[int],
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    prob_vars: gp.tupledict[int, gp.Var],
+    weights: np.ndarray,
+    prob_constraints: gp.tupledict[int, gp.Constr],
+    prefix: str = "prob",
+    prefix_sep: str = "_"
+):
+    if isinstance(classes, int):
+        classes = [classes]
+
+    for c in classes:
+        expr = build_weighted_prob_expr(
+            tree_ensemble, flow_vars, weights, c
+        )
+        cons = model.addConstr(
+            prob_vars[c] == expr,
+            name=f"{prefix}{prefix_sep}{c}"
+        )
+        prob_constraints[c] = cons
+
+
+def add_prob_objective(
+    model: gp.Model,
+    prob_vars: gp.tupledict[int, gp.Var],
+    c1: int,
+    c2: int
+):
+    model.setObjective(
+        prob_vars[c1] - prob_vars[c2],
+        GRB.MAXIMIZE
+    )
+
+
+def add_majority_class(
+    model: gp.Model,
+    prob_vars: gp.tupledict[int, gp.Var],
+    majority_class: int,
+    wm: float,
+    majority_class_constraints: gp.tupledict[int, gp.Constr],
+    name: str = "majority"
+):
+    for c in prob_vars.keys():
+        if c == majority_class:
+            continue
+        rhs = (0.0 if majority_class < c else wm)
+        cons = model.addConstr(
+            prob_vars[majority_class] - prob_vars[c] >= rhs,
+            name=f"{name}_{c}"
+        )
+        majority_class_constraints[c] = cons
+
+
+def add_isolation_plausibility_constraints(
+    model: gp.Model,
+    ensemble: TreeEnsemble,
+    flow_vars: gp.tupledict[tuple[int, int], gp.Var],
+    max_samples: int,
+    anomaly_var: gp.Var,
+    offset: float,
+    name: str = "isolation_plausibility"
+) -> tuple[gp.Constr, gp.Constr]:
+
+    m = len(ensemble)
+    d = m * _average_path_length([max_samples])[0]
+
+    lhs = gp.quicksum(
+        (tree.node_depth[n]
+         + _average_path_length(
+             [tree.n_samples[n]])[0]
+         ) * flow_vars[t, n]
+        for t, tree in enumerate(ensemble)
+        for n in tree.leaves
+    ) / d
+
+    min_score = -np.log2(-offset)
+    return model.addConstr(
+        lhs == anomaly_var,
+        name=name
+    ), model.addConstr(
+        anomaly_var >= min_score,
+        name=f"{name}_min_score"
+    )
+
+
+def get_binary_feature_values(
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    best: bool = False
+):
+    x = dict()
+    for f in binary_features:
+        if best:
+            x[f] = binary_vars[f].X
+        else:
+            x[f] = binary_vars[f].Xn
+    return x
+
+
+def get_discrete_feature_values(
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    best: bool = False
+):
+    x = dict()
+    for f in discrete_features:
+        n = len(discrete_values[f])
+        j = 0
+        while j < n:
+            if best:
+                if discrete_vars[f, j].X < 0.5:
+                    break
+            else:
+                if discrete_vars[f, j].Xn < 0.5:
+                    break
+            j += 1
+        if j == n:
+            j -= 1
+        x[f] = discrete_values[f][j]
+    return x
+
+
+def get_continuous_feature_values(
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    best: bool = False
+):
+    x = dict()
+    for f in continuous_features:
+        levels = continuous_levels[f]
+        n = len(levels) - 1
+        j = 0
+        while j < n:
+            if best:
+                if continuous_vars[f, j].X < 0.5:
+                    break
+            else:
+                if continuous_vars[f, j].Xn < 0.5:
+                    break
+            j += 1
+        if j == n:
+            j -= 1
+        x[f] = (levels[j-1] + levels[j]) / 2.0
+    return x
+
+
+def get_categorical_feature_values(
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    best: bool = False
+):
+    x = dict()
+    for f in categorical_features:
+        for c in categorical_categories[f]:
+            if best:
+                x[c] = categorical_vars[c].X
+            else:
+                x[c] = categorical_vars[c].Xn
+    return x
+
+
+def get_feature_values(
+    binary_features: list[str],
+    binary_vars: gp.tupledict[str, gp.Var],
+    discrete_features: list[str],
+    discrete_values: dict[str, list[numeric]],
+    discrete_vars: gp.tupledict[tuple[str, int], gp.Var],
+    continuous_features: list[str],
+    continuous_levels: dict[str, list[numeric]],
+    continuous_vars: gp.tupledict[tuple[str, int], gp.Var],
+    categorical_features: list[str],
+    categorical_categories: dict[str, list[str]],
+    categorical_vars: gp.tupledict[str, gp.Var],
+    best: bool = False
+):
+    x = dict()
+    x.update(get_binary_feature_values(
+        binary_features, binary_vars, best))
+    x.update(get_discrete_feature_values(
+        discrete_features, discrete_values, discrete_vars, best))
+    x.update(get_continuous_feature_values(
+        continuous_features, continuous_levels, continuous_vars, best))
+    x.update(get_categorical_feature_values(
+        categorical_features, categorical_categories, categorical_vars, best))
+    return x
+
+
+def to_array_values(
+    columns: list[str],
+    values: dict[str, numeric] | list[dict[str, numeric]]
+):
+    if not isinstance(values, list):
+        values = [values]
+
+    X = pd.DataFrame(values, columns=columns)
+    return X
 
 
 class BaseOracle(ABC):
@@ -25,6 +842,7 @@ class BaseOracle(ABC):
 class FIPEOracle:
     feature_encoder: FeatureEncoder
     tree_ensemble: TreeEnsemble
+    isolation_ensemble: TreeEnsemble
 
     gurobi_model: gp.Model
 
@@ -36,36 +854,86 @@ class FIPEOracle:
     branch_to_left_constraints: gp.tupledict[tuple[int, int], gp.Constr]
     branch_to_right_constraints: gp.tupledict[tuple[int, int], gp.Constr]
 
+    # Isolation:
+    isolation_flow_vars: gp.tupledict[tuple[int, int], gp.Var]
+    isolation_branch_vars: gp.tupledict[tuple[int, int], gp.Var]
+    isolation_root_constraints: gp.tupledict[int, gp.Constr]
+    isolation_flow_constraints: gp.tupledict[
+        tuple[int, int], gp.Constr]
+    isolation_branch_to_left_constraints: gp.tupledict[
+        tuple[int, int], gp.Constr]
+    isolation_branch_to_right_constraints: gp.tupledict[
+        tuple[int, int], gp.Constr]
+
     # Features:
+    # Variables:
     binary_vars: gp.tupledict[str, gp.Var]
     discrete_vars: gp.tupledict[tuple[str, int], gp.Var]
     continuous_vars: gp.tupledict[tuple[str, int], gp.Var]
     categorical_vars: gp.tupledict[str, gp.Var]
-    binary_left_constraints: gp.tupledict[tuple[str, int, int], gp.Constr]
-    binary_right_constraints: gp.tupledict[tuple[str, int, int], gp.Constr]
+
+    # Constraints:
+    binary_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+    binary_right_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+    isolation_binary_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+    isolation_binary_right_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+
     discrete_left_constraints: gp.tupledict[
         tuple[str, int, int, int], gp.Constr]
     discrete_right_constraints: gp.tupledict[
         tuple[str, int, int, int], gp.Constr]
     discrete_logical_constraints: gp.tupledict[
         tuple[str, int], gp.Constr]
+    isolation_discrete_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr]
+    isolation_discrete_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr]
+    isolation_discrete_logical_constraints: gp.tupledict[
+        tuple[str, int], gp.Constr]
+
     continuous_left_constraints: gp.tupledict[
         tuple[str, int, int, int], gp.Constr]
     continuous_right_constraints: gp.tupledict[
         tuple[str, int, int, int], gp.Constr]
-    continuous_logical_constraints: gp.tupledict[tuple[str, int], gp.Constr]
-    categorical_left_constraints: gp.tupledict[tuple[str, int, int], gp.Constr]
+    continuous_logical_constraints: gp.tupledict[
+        tuple[str, int], gp.Constr]
+    isolation_continuous_left_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr]
+    isolation_continuous_right_constraints: gp.tupledict[
+        tuple[str, int, int, int], gp.Constr]
+    isolation_continuous_logical_constraints: gp.tupledict[
+        tuple[str, int], gp.Constr]
+
+    categorical_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
     categorical_right_constraints: gp.tupledict[
         tuple[str, int, int], gp.Constr]
     categorical_logical_constraints: gp.tupledict[str, gp.Constr]
+    isolation_categorical_left_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+    isolation_categorical_right_constraints: gp.tupledict[
+        tuple[str, int, int], gp.Constr]
+    isolation_categorical_logical_constraints: gp.tupledict[str, gp.Constr]
 
     # Probabilities:
     prob_vars: gp.tupledict[int, gp.Var]
     prob_constraints: gp.tupledict[int, gp.Constr]
+    anomaly_var: gp.Var
+    anomaly_constraint: gp.Constr
+    isolation_constraint = gp.Constr
 
-    prune_prob_vars: gp.tupledict[int, gp.Var]
-    prune_prob_constraints: gp.tupledict[int, gp.Constr]
+    active_prob_vars: gp.tupledict[int, gp.Var]
+    active_prob_constraints: gp.tupledict[int, gp.Constr]
     majority_class_constraints: gp.tupledict[int, gp.Constr]
+
+    continuous_levels: dict[str, list[numeric]]
+    eps: float
+    max_samples: int
+    offset: float
     c1: int
     c2: int
 
@@ -73,299 +941,226 @@ class FIPEOracle:
         self,
         feature_encoder: FeatureEncoder,
         tree_ensemble: TreeEnsemble,
+        isolation_ensemble: TreeEnsemble,
         weights,
+        max_samples: int,
+        offset: float,
         **kwargs
     ):
         self.feature_encoder = feature_encoder
         self.tree_ensemble = tree_ensemble
+        self.isolation_ensemble = isolation_ensemble
         self.weights = np.array(weights)
+        self.max_samples = max_samples
+        self.offset = offset
+        self.continuous_levels = dict()
+        self.merge_continuous_levels()
         self.eps = kwargs.get("eps", 1.0)
 
-    def build_trees(self):
-        gurobi_model = self.gurobi_model
-        tree_ensemble = self.tree_ensemble
-        for t, tree in enumerate(tree_ensemble):
-            for n in tree:
-                var = gurobi_model.addVar(
-                    vtype=GRB.CONTINUOUS,
-                    lb=0.0,
-                    ub=1.0,
-                    name=f"flow_{t}_{n}"
-                )
-                self.flow_vars[t, n] = var
+    def merge_continuous_levels(self):
+        for f in self.feature_encoder.continuous_features:
+            levels = set(self.tree_ensemble.numerical_levels[f])
+            levels.update(self.isolation_ensemble.numerical_levels[f])
+            levels = sorted(levels)
+            self.continuous_levels[f] = list(levels)
 
-            for d in range(tree.max_depth):
-                var = gurobi_model.addVar(
-                    vtype=GRB.BINARY,
-                    name=f"branch_{t}_{d}"
-                )
-                self.branch_vars[t, d] = var
+    def add_binary_vars(self):
+        add_feature_binary_vars(
+            self.gurobi_model,
+            self.feature_encoder.binary_features,
+            self.binary_vars, name="binary"
+        )
 
-        for t, tree in enumerate(tree_ensemble):
-            root = tree.root
-            cons = gurobi_model.addConstr(
-                self.flow_vars[t, root] == 1.0,
-                name=f"root_{t}"
-            )
-            self.root_constraints[t] = cons
+    def add_discrete_vars(self):
+        add_feature_discrete_vars(
+            self.gurobi_model,
+            self.feature_encoder.discrete_features,
+            self.feature_encoder.values, self.discrete_vars,
+            name="discrete"
+        )
 
-            for n in tree.internal_nodes:
-                left = tree.left[n]
-                right = tree.right[n]
-                cons = gurobi_model.addConstr(
-                    self.flow_vars[t, left] + self.flow_vars[t, right]
-                    == self.flow_vars[t, n],
-                    name=f"flow_{t}_{n}"
-                )
-                self.flow_constraints[t, n] = cons
+    def add_continuous_vars(self):
+        add_feature_continuous_vars(
+            self.gurobi_model,
+            self.feature_encoder.continuous_features,
+            self.continuous_levels, self.continuous_vars,
+            name="continuous"
+        )
 
-                d = tree.node_depth[n]
-                cons = gurobi_model.addConstr(
-                    self.flow_vars[t, left]
-                    <= self.branch_vars[t, d],
-                    name=f"branch_to_left_{t}_{n}"
-                )
-                self.branch_to_left_constraints[t, n] = cons
+    def add_categorical_vars(self):
+        add_feature_categorical_vars(
+            self.gurobi_model,
+            self.feature_encoder.categorical_features,
+            self.feature_encoder.categories, self.categorical_vars,
+            name="categorical"
+        )
 
-                cons = gurobi_model.addConstr(
-                    self.flow_vars[t, right]
-                    <= 1-self.branch_vars[t, d],
-                    name=f"branch_to_right_{t}_{n}"
-                )
-                self.branch_to_right_constraints[t, n] = cons
-
-    def build_features(self):
+    def add_feature_vars(self):
         self.add_binary_vars()
         self.add_discrete_vars()
         self.add_continuous_vars()
         self.add_categorical_vars()
 
+    def add_binary_constraints(self):
+        add_feature_binary_constraints(
+            self.gurobi_model,
+            self.feature_encoder.binary_features,
+            self.binary_vars, self.tree_ensemble,
+            self.flow_vars, self.binary_left_constraints,
+            self.binary_right_constraints,
+            prefix="tree_binary"
+        )
+        add_feature_binary_constraints(
+            self.gurobi_model,
+            self.feature_encoder.binary_features,
+            self.binary_vars, self.isolation_ensemble,
+            self.isolation_flow_vars, self.isolation_binary_left_constraints,
+            self.isolation_binary_right_constraints,
+            prefix="isolation_binary"
+        )
+
+    def add_discrete_constraints(self):
+        add_feature_discrete_constraints(
+            self.gurobi_model,
+            self.feature_encoder.discrete_features,
+            self.feature_encoder.values, self.discrete_vars,
+            self.tree_ensemble, self.flow_vars,
+            self.discrete_left_constraints,
+            self.discrete_right_constraints,
+            self.discrete_logical_constraints,
+            prefix="tree_discrete"
+        )
+        add_feature_discrete_constraints(
+            self.gurobi_model,
+            self.feature_encoder.discrete_features,
+            self.feature_encoder.values, self.discrete_vars,
+            self.isolation_ensemble, self.isolation_flow_vars,
+            self.isolation_discrete_left_constraints,
+            self.isolation_discrete_right_constraints,
+            self.isolation_discrete_logical_constraints,
+            prefix="isolation_discrete"
+        )
+
+    def add_continuous_constraints(self):
+        add_feature_continuous_constraints(
+            self.gurobi_model,
+            self.feature_encoder.continuous_features,
+            self.continuous_levels, self.continuous_vars,
+            self.tree_ensemble, self.flow_vars,
+            self.continuous_left_constraints,
+            self.continuous_right_constraints,
+            self.continuous_logical_constraints,
+            prefix="tree_continuous"
+        )
+        add_feature_continuous_constraints(
+            self.gurobi_model,
+            self.feature_encoder.continuous_features,
+            self.continuous_levels, self.continuous_vars,
+            self.isolation_ensemble, self.isolation_flow_vars,
+            self.isolation_continuous_left_constraints,
+            self.isolation_continuous_right_constraints,
+            self.isolation_continuous_logical_constraints,
+            prefix="isolation_continuous"
+        )
+
+    def add_categorical_constraints(self):
+        add_feature_categorical_constraints(
+            self.gurobi_model,
+            self.feature_encoder.categorical_features,
+            self.feature_encoder.categories, self.categorical_vars,
+            self.tree_ensemble, self.flow_vars,
+            self.categorical_left_constraints,
+            self.categorical_right_constraints,
+            self.categorical_logical_constraints,
+            prefix="tree_categorical"
+        )
+        add_feature_categorical_constraints(
+            self.gurobi_model,
+            self.feature_encoder.categorical_features,
+            self.feature_encoder.categories, self.categorical_vars,
+            self.isolation_ensemble, self.isolation_flow_vars,
+            self.isolation_categorical_left_constraints,
+            self.isolation_categorical_right_constraints,
+            self.isolation_categorical_logical_constraints,
+            prefix="isolation_categorical"
+        )
+
+    def add_feature_constraints(self):
         self.add_binary_constraints()
         self.add_discrete_constraints()
         self.add_continuous_constraints()
         self.add_categorical_constraints()
 
-    def add_binary_vars(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.binary_features:
-            var = gurobi_model.addVar(
-                vtype=GRB.BINARY,
-                name=f"binary_{f}"
-            )
-            self.binary_vars[f] = var
-
-    def add_discrete_vars(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.discrete_features:
-            n = len(feature_encoder.values[f])
-            for v in range(n):
-                var = gurobi_model.addVar(
-                    vtype=GRB.CONTINUOUS,
-                    lb=0.0,
-                    ub=1.0,
-                    name=f"discrete_{f}_{v}"
-                )
-                self.discrete_vars[f, v] = var
-
-    def add_continuous_vars(self):
-        gurobi_model = self.gurobi_model
-        tree_ensemble = self.tree_ensemble
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.continuous_features:
-            n = len(tree_ensemble.numerical_levels[f])
-            for i in range(n-1):
-                var = gurobi_model.addVar(
-                    vtype=GRB.CONTINUOUS,
-                    lb=0.0,
-                    ub=1.0,
-                    name=f"continuous_{f}_{i}"
-                )
-                self.continuous_vars[f, i] = var
-
-    def add_categorical_vars(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.categorical_features:
-            for c in feature_encoder.categories[f]:
-                var = gurobi_model.addVar(
-                    vtype=GRB.BINARY,
-                    name=f"categorical_{c}"
-                )
-                self.categorical_vars[c] = var
-
-    def add_binary_constraints(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        tree_ensemble = self.tree_ensemble
-        for f in feature_encoder.binary_features:
-            for t, tree in enumerate(tree_ensemble):
-                for n in tree.node_split_on(f):
-                    left = tree.left[n]
-                    right = tree.right[n]
-                    cons = gurobi_model.addConstr(
-                        self.binary_vars[f] <=
-                        1 - self.flow_vars[t, left],
-                        name=f"binary_left_{f}_{t}_{n}"
-                    )
-                    self.binary_left_constraints[f, t, n] = cons
-                    cons = gurobi_model.addConstr(
-                        self.binary_vars[f] >=
-                        self.flow_vars[t, right],
-                        name=f"binary_right_{f}_{t}_{n}"
-                    )
-                    self.binary_right_constraints[f, t, n] = cons
-
-    def add_discrete_constraints(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        tree_ensemble = self.tree_ensemble
-        for f in feature_encoder.discrete_features:
-            values = feature_encoder.values[f]
-            for i, v in enumerate(values):
-                if i == 0:
-                    cons = gurobi_model.addConstr(
-                        self.discrete_vars[f, i] == 1.0,
-                        name=f"discrete_logical_{f}_{i}"
-                    )
-                    self.discrete_logical_constraints[f, i] = cons
-                else:
-                    cons = gurobi_model.addConstr(
-                        self.discrete_vars[f, i] <=
-                        self.discrete_vars[f, i-1],
-                        name=f"discrete_logical_{f}_{i}"
-                    )
-                    self.discrete_logical_constraints[f, i] = cons
-                for t, tree in enumerate(tree_ensemble):
-                    for n in tree.node_split_on(f):
-                        if v == tree.threshold[n]:
-                            left = tree.left[n]
-                            right = tree.right[n]
-                            cons = gurobi_model.addConstr(
-                                self.discrete_vars[f, i] <=
-                                1 - self.flow_vars[t, left],
-                                name=f"discrete_left_{f}_{i}_{t}_{n}"
-                            )
-                            self.discrete_left_constraints[f, i, t, n] = cons
-                            cons = gurobi_model.addConstr(
-                                self.discrete_vars[f, i] >=
-                                self.flow_vars[t, right],
-                                name=f"discrete_right_{f}_{i}_{t}_{n}"
-                            )
-                            self.discrete_right_constraints[f, i, t, n] = cons
-
-    def add_continuous_constraints(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        tree_ensemble = self.tree_ensemble
-        for f in feature_encoder.continuous_features:
-            levels = tree_ensemble.numerical_levels[f]
-            for i, v in enumerate(levels[:-1]):
-                if i == 0:
-                    cons = gurobi_model.addConstr(
-                        self.continuous_vars[f, i] == 1.0,
-                        name=f"continuous_logical_{f}_{i}"
-                    )
-                    self.continuous_logical_constraints[f, i] = cons
-                else:
-                    cons = gurobi_model.addConstr(
-                        self.continuous_vars[f, i] <=
-                        self.continuous_vars[f, i-1],
-                        name=f"continuous_logical_{f}_{i}"
-                    )
-                    self.continuous_logical_constraints[f, i] = cons
-                    for t, tree in enumerate(tree_ensemble):
-                        for n in tree.node_split_on(f):
-                            if v == tree.threshold[n]:
-                                left = tree.left[n]
-                                right = tree.right[n]
-                                cons = gurobi_model.addConstr(
-                                    self.continuous_vars[f, i] <=
-                                    1 - self.flow_vars[t, left],
-                                    name=f"continuous_left_{f}_{i}_{t}_{n}"
-                                )
-                                self.continuous_left_constraints[
-                                    f, i, t, n] = cons
-                                cons = gurobi_model.addConstr(
-                                    self.continuous_vars[f, i] >=
-                                    self.flow_vars[t, right],
-                                    name=f"continuous_right_{f}_{i}_{t}_{n}"
-                                )
-                                self.continuous_right_constraints[
-                                    f, i, t, n] = cons
-
-    def add_categorical_constraints(self):
-        gurobi_model = self.gurobi_model
-        feature_encoder = self.feature_encoder
-        tree_ensemble = self.tree_ensemble
-        for f in feature_encoder.categorical_features:
-            cons = gurobi_model.addConstr(
-                gp.quicksum(
-                    self.categorical_vars[c]
-                    for c in feature_encoder.categories[f]
-                ) == 1,
-                name=f"categorical_logical_{f}"
-            )
-            self.categorical_logical_constraints[f] = cons
-            for c in feature_encoder.categories[f]:
-                for t, tree in enumerate(tree_ensemble):
-                    for n in tree.node_split_on(f):
-                        if c == tree.category[n]:
-                            left = tree.left[n]
-                            right = tree.right[n]
-                            cons = gurobi_model.addConstr(
-                                self.categorical_vars[c] <=
-                                1 - self.flow_vars[t, left],
-                                name=f"categorical_left_{c}_{t}_{n}"
-                            )
-                            self.categorical_left_constraints[c, t, n] = cons
-                            cons = gurobi_model.addConstr(
-                                self.categorical_vars[c] >=
-                                self.flow_vars[t, right],
-                                name=f"categorical_right_{c}_{t}_{n}"
-                            )
-                            self.categorical_right_constraints[c, t, n] = cons
+    def build_features(self):
+        self.add_feature_vars()
+        self.add_feature_constraints()
 
     def add_prob_vars(self):
-        gurobi_model = self.gurobi_model
-        tree_ensemble = self.tree_ensemble
-        k = tree_ensemble.n_classes
-        for c in range(k):
-            var = gurobi_model.addVar(
-                vtype=GRB.CONTINUOUS,
-                lb=0.0,
-                name=f"prob_{c}"
-            )
-            self.prob_vars[c] = var
+        add_prob_vars(
+            self.gurobi_model, self.prob_vars,
+            list(range(self.tree_ensemble.n_classes)),
+            name="prob"
+        )
 
     def add_prob_constraints(self):
-        gurobi_model = self.gurobi_model
-        tree_ensemble = self.tree_ensemble
-        k = tree_ensemble.n_classes
-        for c in range(k):
-            cons = gurobi_model.addConstr(
-                self.prob_vars[c] ==
-                gp.quicksum(
-                    self.weights[t]
-                    * self.flow_vars[t, n]
-                    * tree.prob[n][c]
-                    for t, tree in enumerate(tree_ensemble)
-                    for n in tree.leaves
-                ),
-                name=f"prob_{c}"
-            )
-            self.prob_constraints[c] = cons
+        add_prob_constraints(
+            self.gurobi_model, self.tree_ensemble,
+            list(range(self.tree_ensemble.n_classes)),
+            self.flow_vars, self.prob_vars, self.weights,
+            self.prob_constraints,
+            prefix="prob"
+        )
 
-    def build(self):
-        gurobi_model = gp.Model("FIPEOracle")
-        self.gurobi_model = gurobi_model
+    def build_trees(self):
+        add_tree_ensemble_vars_and_constraints(
+            self.gurobi_model, self.tree_ensemble,
+            self.flow_vars, self.branch_vars,
+            self.root_constraints, self.flow_constraints,
+            self.branch_to_left_constraints,
+            self.branch_to_right_constraints,
+            prefix="tree",
+        )
+        add_tree_ensemble_vars_and_constraints(
+            self.gurobi_model, self.isolation_ensemble,
+            self.isolation_flow_vars, self.isolation_branch_vars,
+            self.isolation_root_constraints, self.isolation_flow_constraints,
+            self.isolation_branch_to_left_constraints,
+            self.isolation_branch_to_right_constraints,
+            prefix="isolation",
+        )
+
+    def add_anomaly_var(self):
+        self.anomaly_var = self.gurobi_model.addVar(
+            vtype=GRB.CONTINUOUS,
+            lb=-GRB.INFINITY,
+            name="anomaly"
+        )
+
+    def add_isolation_plausibility_constraints(self):
+        conss = add_isolation_plausibility_constraints(
+            self.gurobi_model, self.isolation_ensemble,
+            self.isolation_flow_vars, self.max_samples,
+            self.anomaly_var, self.offset
+        )
+        self.isolation_constraint = conss[1]
+        self.anomaly_constraint = conss[0]
+
+    def init(self):
+        self.gurobi_model = gp.Model("FIPEOracle")
+
         self.flow_vars = gp.tupledict()
         self.branch_vars = gp.tupledict()
         self.root_constraints = gp.tupledict()
         self.flow_constraints = gp.tupledict()
         self.branch_to_left_constraints = gp.tupledict()
         self.branch_to_right_constraints = gp.tupledict()
+
+        self.isolation_flow_vars = gp.tupledict()
+        self.isolation_branch_vars = gp.tupledict()
+        self.isolation_root_constraints = gp.tupledict()
+        self.isolation_flow_constraints = gp.tupledict()
+        self.isolation_branch_to_left_constraints = gp.tupledict()
+        self.isolation_branch_to_right_constraints = gp.tupledict()
 
         self.binary_vars = gp.tupledict()
         self.discrete_vars = gp.tupledict()
@@ -374,94 +1169,91 @@ class FIPEOracle:
 
         self.binary_left_constraints = gp.tupledict()
         self.binary_right_constraints = gp.tupledict()
+        self.isolation_binary_left_constraints = gp.tupledict()
+        self.isolation_binary_right_constraints = gp.tupledict()
+
         self.discrete_left_constraints = gp.tupledict()
         self.discrete_right_constraints = gp.tupledict()
         self.discrete_logical_constraints = gp.tupledict()
+        self.isolation_discrete_left_constraints = gp.tupledict()
+        self.isolation_discrete_right_constraints = gp.tupledict()
+        self.isolation_discrete_logical_constraints = gp.tupledict()
+
         self.continuous_left_constraints = gp.tupledict()
         self.continuous_right_constraints = gp.tupledict()
         self.continuous_logical_constraints = gp.tupledict()
+        self.isolation_continuous_left_constraints = gp.tupledict()
+        self.isolation_continuous_right_constraints = gp.tupledict()
+        self.isolation_continuous_logical_constraints = gp.tupledict()
+
         self.categorical_left_constraints = gp.tupledict()
         self.categorical_right_constraints = gp.tupledict()
         self.categorical_logical_constraints = gp.tupledict()
+        self.isolation_categorical_left_constraints = gp.tupledict()
+        self.isolation_categorical_right_constraints = gp.tupledict()
+        self.isolation_categorical_logical_constraints = gp.tupledict()
 
         self.prob_vars = gp.tupledict()
         self.prob_constraints = gp.tupledict()
-        self.prune_prob_vars = gp.tupledict()
-        self.prune_prob_constraints = gp.tupledict()
+        self.active_prob_vars = gp.tupledict()
+        self.active_prob_constraints = gp.tupledict()
         self.majority_class_constraints = gp.tupledict()
+
+    def build(self):
+        self.init()
 
         self.build_trees()
         self.build_features()
 
         self.add_prob_vars()
         self.add_prob_constraints()
+        self.add_anomaly_var()
+        self.add_isolation_plausibility_constraints()
 
-    def add_prune_prob_vars(self, classes: list[int]):
-        gurobi_model = self.gurobi_model
-        for c in classes:
-            var = gurobi_model.addVar(
-                vtype=GRB.CONTINUOUS,
-                lb=0.0,
-                name=f"prune_prob_{c}"
-            )
-            self.prune_prob_vars[c] = var
+    def add_active_prob_vars(self, classes: list[int]):
+        add_prob_vars(
+            self.gurobi_model, self.active_prob_vars,
+            classes, name="active_prob"
+        )
 
-    def add_prune_prob_constraints(self, classes: int | list[int]):
-        gurobi_model = self.gurobi_model
+    def add_active_prob_constraints(self, classes: int | list[int]):
         active = self.active
-        if isinstance(classes, int):
-            classes = [classes]
-        for c in classes:
-            cons = gurobi_model.addConstr(
-                self.prune_prob_vars[c] ==
-                gp.quicksum(
-                    self.weights[t]
-                    * active[t]
-                    * self.flow_vars[t, n]
-                    * tree.prob[n][c]
-                    for t, tree in enumerate(self.tree_ensemble)
-                    for n in tree.leaves
-                ),
-                name=f"prune_prob_{c}"
-            )
-            self.prune_prob_constraints[c] = cons
+        add_prob_constraints(
+            self.gurobi_model, self.tree_ensemble,
+            classes, self.flow_vars, self.active_prob_vars,
+            self.weights * active,
+            self.active_prob_constraints,
+            prefix="active_prob"
+        )
 
     def add_majority_class_constraints(self, mc: int):
-        gurobi_model = self.gurobi_model
-        k = self.tree_ensemble.n_classes
         wm = self.weights.min()
         eps = self.eps
-        for c in range(k):
-            if c == mc:
-                continue
-            rhs = (eps*wm if mc > c else 0.0)
-            cons = gurobi_model.addConstr(
-                self.prob_vars[mc] - self.prob_vars[c]
-                >= rhs,
-                name=f"majority_class_{c}"
-            )
-            self.majority_class_constraints[c] = cons
+        add_majority_class(
+            self.gurobi_model,
+            self.active_prob_vars, mc, wm * eps,
+            self.majority_class_constraints,
+            name="majority_class"
+        )
 
     def add_objective(self):
-        c1 = self.c1
-        c2 = self.c2
-        gurobi_model = self.gurobi_model
-        gurobi_model.setObjective(
-            self.prune_prob_vars[c2] - self.prune_prob_vars[c1],
-            GRB.MAXIMIZE
+        add_prob_objective(
+            self.gurobi_model,
+            self.active_prob_vars,
+            self.c1, self.c2
         )
 
     def add(self, mc: int, c: int):
         self.c1 = mc
         self.c2 = c
-        self.add_prune_prob_vars([mc, c])
-        self.add_prune_prob_constraints([mc, c])
+        self.add_active_prob_vars([mc, c])
+        self.add_active_prob_constraints([mc, c])
         self.add_majority_class_constraints(mc)
         self.add_objective()
 
     def reset(self):
-        self.gurobi_model.remove(self.prune_prob_vars)
-        self.gurobi_model.remove(self.prune_prob_constraints)
+        self.gurobi_model.remove(self.active_prob_vars)
+        self.gurobi_model.remove(self.active_prob_constraints)
         self.gurobi_model.remove(self.majority_class_constraints)
 
     def optimize(self):
@@ -508,55 +1300,23 @@ class FIPEOracle:
 
                 X.extend(Xi)
                 self.reset()
-        return self.to_array(X)
-
-    def get_binary_values(self, x):
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.binary_features:
-            x[f] = self.binary_vars[f].Xn > 0.5
-
-    def get_discrete_values(self, x):
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.discrete_features:
-            values = feature_encoder.values[f]
-            j = 0
-            while j < len(values) and self.discrete_vars[f, j].Xn > 0.5:
-                j += 1
-            assert j < len(values)
-            x[f] = values[j-1]
-
-    def get_continuous_values(self, x):
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.continuous_features:
-            levels = self.tree_ensemble.numerical_levels[f]
-            j = 0
-            while j < len(levels)-1 and self.continuous_vars[f, j].Xn > 0.5:
-                j += 1
-            if j == len(levels)-1:
-                x[f] = levels[j]
-            else:
-                x[f] = (levels[j-1] + levels[j]) / 2.0
-
-    def get_categorical_values(self, x):
-        feature_encoder = self.feature_encoder
-        for f in feature_encoder.categorical_features:
-            categories = feature_encoder.categories[f]
-            for c in categories:
-                x[c] = self.categorical_vars[c].Xn > 0.5
+        columns = self.feature_encoder.columns
+        return to_array_values(columns, X)
 
     def get_feature_values(self):
-        x = dict()
-        self.get_binary_values(x)
-        self.get_discrete_values(x)
-        self.get_continuous_values(x)
-        self.get_categorical_values(x)
-        return x
-
-    def to_array(self, x):
-        cols = self.feature_encoder.columns
-        if not isinstance(x, list):
-            x = [x]
-        return pd.DataFrame(x, columns=cols).values
+        return get_feature_values(
+            self.feature_encoder.binary_features,
+            self.binary_vars,
+            self.feature_encoder.discrete_features,
+            self.feature_encoder.values,
+            self.discrete_vars,
+            self.feature_encoder.continuous_features,
+            self.continuous_levels,
+            self.continuous_vars,
+            self.feature_encoder.categorical_features,
+            self.feature_encoder.categories,
+            self.categorical_vars
+        )
 
     def get_all(self, check=True):
         X = []
@@ -582,7 +1342,7 @@ class FIPEOracle:
     # TODO: as a test method in the future.
     def check_solution(self):
         x = self.get_feature_values()
-        xa = self.to_array(x)
+        xa = to_array_values(self.feature_encoder.columns, x).values
 
         # Check if the path in the tree is correct.
         tree_ensemble = self.tree_ensemble
@@ -635,7 +1395,7 @@ class FIPEOracle:
         p = predict_proba(E, xa, self.weights * self.active)
         m = len(E)
         c1 = self.c1
-        p1 = self.prune_prob_vars[c1].Xn / m
+        p1 = self.active_prob_vars[c1].Xn / m
         if not np.isclose(p[0, c1], p1):
             msg = f"The pruning probabilities are incorrect for class {c1}."
             logger.debug(msg)
@@ -647,7 +1407,7 @@ class FIPEOracle:
             logger.debug(msg)
 
         c2 = self.c2
-        p2 = self.prune_prob_vars[c2].Xn / m
+        p2 = self.active_prob_vars[c2].Xn / m
         if not np.isclose(p[0, c2], p2):
             msg = f"The pruning probabilities are incorrect for class {c2}."
             logger.debug(msg)

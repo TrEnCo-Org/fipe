@@ -6,6 +6,8 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 
+from sklearn.ensemble import IsolationForest
+
 from ._predict import (
     predict_single_proba,
     predict
@@ -114,13 +116,28 @@ class FIPEPrunerFull(BasePruner):
         self,
         ensemble_model,
         weights,
+        isolation_forest: IsolationForest,
         feature_encoder: FeatureEncoder,
         **kwargs
     ):
-        tree_ensemble = TreeEnsemble(ensemble_model, feature_encoder, **kwargs)
-        self.pruner = FIPEPruner(ensemble_model, weights, **kwargs)
+        tree_ensemble = TreeEnsemble(
+            ensemble_model,
+            feature_encoder, **kwargs)
+        isolation_ensemble = TreeEnsemble(
+            isolation_forest,
+            feature_encoder,
+            **kwargs)
+        self.pruner = FIPEPruner(
+            ensemble_model,
+            weights, **kwargs)
         self.oracle = FIPEOracle(
-            feature_encoder, tree_ensemble, weights, **kwargs)
+            feature_encoder,
+            tree_ensemble,
+            isolation_ensemble,
+            weights,
+            isolation_forest.max_samples_,
+            isolation_forest.offset_,
+            **kwargs)
         self.max_iter = kwargs.get("max_iter", 100)
 
     def build(self):
