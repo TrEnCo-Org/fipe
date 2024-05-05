@@ -1,76 +1,35 @@
-from pathlib import Path
-import pandas as pd
-
-dataset = 'Breast-Cancer-Wisconsin'
-dataset_path = Path(__file__).parent / dataset
-
-print(dataset_path)
-
-data = pd.read_csv(dataset_path / f'{dataset}.full.csv')
-target = data.iloc[:, -1]
-data = data.iloc[:, :-1]
-
-f = open(dataset_path / f'{dataset}.featurelist.csv')
-features = f.read().split(',')[:-1]
-f.close()
-
-from fipe import FeatureEncoder
-
-encoder = FeatureEncoder()
-encoder.fit(data)
-
-X = encoder.X.values
-y = target.astype('category').cat.codes
-y = y.values
-
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+import unittest
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-rf = RandomForestClassifier(n_estimators=100, random_state=42)
-rf.fit(X_train, y_train)
+from fipe import FeatureEncoder, FIPEPruner
+from tests.utils import read_dataset
 
 
-import numpy as np
-w = np.ones(len(rf))
+class TestPruner(unittest.TestCase):
+    dataset = 'Breast-Cancer-Wisconsin'
+    data, y, _ = read_dataset(dataset)
 
-u = np.array([
-True, True, False, False, True, True, False, True, True, False, False, False,
-True, False, False, False, True, True, False, True, False, True, False, False,
-True, True, False, True, False, False, True, True, False, True, True, False,
-False, False, True, True, False, False, True, True, True, False, True, True,
-False, True, False, True, False, False, False, True, False, True, True, True,
-True, False, False, True, False, False, False, True, False, True, False, False,
-False, False, True, False, False, False, False, False, False, True, False, True,
-True, False, False, False, False, True, True, True, True, False, False, False,
-False, True, True, True])
+    # Encode features
+    encoder = FeatureEncoder()
+    encoder.fit(data)
+    X = encoder.X.values
 
-u = np.array([True, True, False, False, True, True, True, True, True, True, False, False,
-False, False, False, False, True, False, False, True, False, False, False, False,
-True, True, True, False, False, True, True, True, True, False, True, True,
-False, False, True, True, False, False, False, True, True, False, False, True,
-False, False, False, True, True, False, False, False, False, False, False, True,
-True, False, False, True, False, True, False, False, True, True, False, False,
-True, False, False, False, True, False, False, False, True, True, False, False,
-False, False, False, False, False, True, True, True, False, True, False, False,
-True, True, True, True])
+    # Train random forest
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.05, random_state=42)
+    rf = RandomForestClassifier(n_estimators=50, random_state=42)
+    rf.fit(X_train, y_train)
 
-from fipe import predict
-
-y_pred = predict(rf, X_test, w)
-y_pruned = predict(rf, X_test, u*w)
-
-print("fid:", np.mean(y_pred == y_test))
-exit(0)
-
-from fipe import FIPEPrunerFull
-
-pruner = FIPEPrunerFull(rf, w, encoder)
-pruner.build()
-pruner.pruner.set_gurobi_parameter('TimeLimit', 60)
-pruner.pruner.set_gurobi_parameter('Threads', 47)
-pruner.pruner.set_gurobi_parameter('OutputFlag', 0)
-pruner.oracle.set_gurobi_parameter('OutputFlag', 0)
-pruner.prune(X_train)
-
+    def test_prune(self):
+        w = np.ones(len(self.rf))
+        pruner = FIPEPruner(self.rf, w)
+        pruner.build()
+        pruner.add_constraints(self.X_test)
+        pruner.prune()
+        # Read solution
+        active_trees = pruner.active
+        self.assertEqual(len(active_trees), len(self.rf))
+        self.assertTrue(set([0, 1]).issuperset(set(active_trees)))
+        self.assertGreaterEqual(np.sum(active_trees), 1)
