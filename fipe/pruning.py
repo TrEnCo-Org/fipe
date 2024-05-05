@@ -537,7 +537,18 @@ class FIPEOracle:
         self.gurobi_model.remove(self.majority_class_constraints)
 
     def optimize(self):
-        self.gurobi_model.optimize()
+        c1 = self.c1
+        c2 = self.c2
+        eps = self.eps
+        wm = self.weights.min()
+        def callback(model: gp.Model, where: int):
+            if where == GRB.Callback.MIPSOL:
+                cutoff = (wm * eps if c1 < c2 else 0.0)
+                val = model.cbGet(GRB.Callback.MIPSOL_OBJBND)
+                if val < cutoff:
+                    model.terminate()
+
+        self.gurobi_model.optimize(callback)
 
     def set_gurobi_parameter(self, param, value):
         self.gurobi_model.setParam(param, value)
