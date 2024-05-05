@@ -8,7 +8,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from ._predict import (
-    # predict_proba,
+    predict_proba,
     predict_single_proba,
     predict
 )
@@ -478,9 +478,9 @@ class FIPEOracle:
             )
             self.prune_prob_vars[c] = var
 
-    def add_prune_prob_constraints(self, active, classes: int | list[int]):
+    def add_prune_prob_constraints(self, classes: int | list[int]):
         gurobi_model = self.gurobi_model
-        active = np.array(active)
+        active = self.active
         if isinstance(classes, int):
             classes = [classes]
         for c in classes:
@@ -523,11 +523,11 @@ class FIPEOracle:
             GRB.MAXIMIZE
         )
 
-    def add(self, active, mc: int, c: int):
+    def add(self, mc: int, c: int):
         self.c1 = mc
         self.c2 = c
         self.add_prune_prob_vars([mc, c])
-        self.add_prune_prob_constraints(active, [mc, c])
+        self.add_prune_prob_constraints([mc, c])
         self.add_majority_class_constraints(mc)
         self.add_objective()
 
@@ -542,15 +542,20 @@ class FIPEOracle:
     def set_gurobi_parameter(self, param, value):
         self.gurobi_model.setParam(param, value)
 
+    def add_active(self, active):
+        self.active = np.asarray(active)
+
     def separate(self, active):
+        logger.debug("Separating the classes.")
         X = []
         nc = self.tree_ensemble.n_classes
+        self.add_active(active)
         for c1 in range(nc):
             for c2 in range(nc):
                 if c1 == c2:
                     continue
         
-                self.add(active, c1, c2)
+                self.add(c1, c2)
                 self.optimize()
                 
                 if self.gurobi_model.SolCount == 0:
@@ -611,18 +616,6 @@ class FIPEOracle:
             x = [x]
         return pd.DataFrame(x, columns=cols).values
 
-    def check_solution(self):
-        x = self.get_feature_values()
-        x = self.to_array(x)
-        
-        # Check if the path in the tree is correct.
-        tree_ensemble = self.tree_ensemble
-        E = tree_ensemble.ensemble_model
-        
-        for t, tree in enumerate(tree_ensemble):
-            e = E[t]
-            path = e.decision_path([x])
-
     def get_all(self, check=True):
         X = []
         c1 = self.c1
@@ -642,6 +635,54 @@ class FIPEOracle:
             x = self.get_feature_values()
             X.append(x)
         return X
+
+    def check_solution(self):
+        x = self.get_feature_values()
+        xa = self.to_array(x)
+        
+        # Check if the path in the tree is correct.
+        tree_ensemble = self.tree_ensemble
+        E = tree_ensemble.ensemble_model
+        
+        for t, tree in enumerate(tree_ensemble):
+            e = E[t]
+            path = e.decision_path(xa)
+            
+            n = tree.root
+            while n not in tree.leaves:
+                f = tree.feature[n]
+                l, r = tree.left[n], tree.right[n]
+                mip_next = (l if self.flow_vars[t, l].Xn > 0.5 else r)
+                path_next = (l if path[0, l] else r)
+                
+                if mip_next != path_next:
+                    logger.debug(f"Tree {t}, node {n}: MIP path {mip_next} != Decision path {path_next}")
+                    logger.debug(f"The node is split on feature {f} with threshold {tree.threshold[n]} and value {x[f]}")
+                    break
+
+                n = mip_next
+        
+        # Check if the probabilities are correct.
+        nc = tree_ensemble.n_classes
+        p = predict_proba(E, xa, self.weights)
+        p_mip = np.array([self.prob_vars[c].Xn for c in range(nc)])
+        p_mip /= p_mip.sum()
+        if not np.isclose(p, p_mip).all():
+            logger.debug(f"Probabilities: MIP {p_mip} != Predict {p}")
+            logger.debug(f"Feature values: {x}")
+
+        # Check if the pruning probabilities are correct.
+        p = predict_proba(E, xa, self.weights * self.active)
+        m = len(E)
+        c1 = self.c1
+        p1 = self.prune_prob_vars[c1].Xn / m
+        if not np.isclose(p[0, c1], p1):
+            logger.debug(f"Pruning probabilities: MIP {p1} != Predict {p[c1]} for class {c1}")
+        c2 = self.c2
+        p2 = self.prune_prob_vars[c2].Xn / m
+        if not np.isclose(p[0, c2], p2).all():
+            logger.debug(f"Pruning probabilities: MIP {p2} != Predict {p[c2]} for class {c2}")
+
 
 class FIPEPrunerFull:
     pruner: FIPEPruner
