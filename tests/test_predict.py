@@ -7,7 +7,7 @@ from fipe import predict_single_proba, predict_proba, predict
 from tests.utils import read_dataset
 
 
-class test_predict(unittest.TestCase):
+class TestPredict(unittest.TestCase):
     # Setup test
     dataset = 'Breast-Cancer-Wisconsin'
     data, y, _ = read_dataset(dataset)
