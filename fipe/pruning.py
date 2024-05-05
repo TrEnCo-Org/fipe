@@ -138,16 +138,14 @@ class FIPEPrunerFull(BasePruner):
 
     def prune(self):
         self.pruner.prune()
-
-        # Call the FIPE Oracle
         active = deepcopy(self.pruner.active)
 
         it = 0
         while True:
             X = self.oracle.separate(active)
-            flag = (len(X) > 0)
+            found_counterfactual = (len(X) > 0)
 
-            if flag:
+            if found_counterfactual:
                 self.pruner.add_constraints(X)
                 self.pruner.prune()
 
