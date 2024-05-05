@@ -1,5 +1,9 @@
 from .encoding import FeatureEncoder
-from .pruning import FIPEPruner, FIPEPrunerFull
+from .pruning import (
+    FIPEPruner,
+    FIPEOracle,
+    FIPEPrunerFull
+)
 
 from .typing import *
 from ._predict import (
@@ -11,6 +15,7 @@ from .tree import TreeEnsemble, Tree
 
 __all__ = [
     'FIPEPruner',
+    'FIPEOracle',
     'FIPEPrunerFull',
     'FeatureEncoder',
     'TreeEnsemble',

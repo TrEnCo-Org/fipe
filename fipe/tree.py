@@ -114,20 +114,27 @@ class TreeEnsemble(Iterable[Tree]):
 
     def __init__(
         self,
-        ensemble,
+        ensemble_model,
         feature_encoder: FeatureEncoder,
         **kwargs
     ):
-        self.n_trees = len(ensemble)
-        self.n_classes = ensemble[0].n_classes_
+        self.ensemble_model = ensemble_model
         self.trees = [
             Tree(tree.tree_, feature_encoder)
-            for tree in ensemble
+            for tree in ensemble_model
         ]
         self.numerical_levels = dict()
         self.tol = kwargs.get("tol", 1e-4)
         
         self.parse_numerical_levels(feature_encoder)
+
+    @property
+    def n_trees(self) -> int:
+        return len(self.ensemble_model)
+
+    @property
+    def n_classes(self) -> int:
+        return self.ensemble_model[0].n_classes_
 
     def __iter__(self) -> Iterator[Tree]:
         return iter(self.trees)

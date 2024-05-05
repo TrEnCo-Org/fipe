@@ -8,7 +8,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from ._predict import (
-    predict_proba,
+    # predict_proba,
     predict_single_proba,
     predict
 )
@@ -99,7 +99,7 @@ class FIPEPruner:
             return np.zeros(m, dtype=bool)
 
         u = self.active_vars
-        v = [u[e].X >= 0.5 for e in range(m)]
+        v = [int(u[e].X >= 0.5) for e in range(m)]
         return np.array(v)
 
 class FIPEOracle:
@@ -140,17 +140,19 @@ class FIPEOracle:
     prune_prob_vars: gp.tupledict[int, gp.Var]
     prune_prob_constraints: gp.tupledict[int, gp.Constr]
     majority_class_constraints: gp.tupledict[int, gp.Constr]
+    c1: int
+    c2: int
     
     def __init__(
         self,
         feature_encoder: FeatureEncoder,
         tree_ensemble: TreeEnsemble,
-        w,
+        weights,
         **kwargs
     ):
         self.feature_encoder = feature_encoder
         self.tree_ensemble = tree_ensemble
-        self.weights = np.array(w)
+        self.weights = np.array(weights)
         self.eps = kwargs.get("eps", 1.0)
 
     def build_trees(self):
@@ -466,7 +468,7 @@ class FIPEOracle:
         self.add_prob_vars()
         self.add_prob_constraints()
 
-    def add_prune_prob_vars(self, classes):
+    def add_prune_prob_vars(self, classes: list[int]):
         gurobi_model = self.gurobi_model
         for c in classes:
             var = gurobi_model.addVar(
@@ -504,7 +506,7 @@ class FIPEOracle:
         for c in range(k):
             if c == mc:
                 continue
-            rhs = (0.0 if c > mc else eps*wm)
+            rhs = (eps*wm if mc > c else 0.0)
             cons = gurobi_model.addConstr(
                 self.prob_vars[mc] - self.prob_vars[c]
                 >= rhs,
@@ -512,18 +514,22 @@ class FIPEOracle:
             )
             self.majority_class_constraints[c] = cons
 
-    def add_objective(self, mc: int, c: int):
+    def add_objective(self):
+        c1 = self.c1
+        c2 = self.c2
         gurobi_model = self.gurobi_model
         gurobi_model.setObjective(
-            self.prune_prob_vars[c] - self.prune_prob_vars[mc],
+            self.prune_prob_vars[c2] - self.prune_prob_vars[c1],
             GRB.MAXIMIZE
         )
 
-    def add_active(self, active, mc: int, c: int):
+    def add(self, active, mc: int, c: int):
+        self.c1 = mc
+        self.c2 = c
         self.add_prune_prob_vars([mc, c])
         self.add_prune_prob_constraints(active, [mc, c])
         self.add_majority_class_constraints(mc)
-        self.add_objective(mc, c)
+        self.add_objective()
 
     def reset(self):
         self.gurobi_model.remove(self.prune_prob_vars)
@@ -536,58 +542,122 @@ class FIPEOracle:
     def set_gurobi_parameter(self, param, value):
         self.gurobi_model.setParam(param, value)
 
-    def get_solutions(self, cutoff=1.0):
-        if self.gurobi_model.SolCount == 0:
-            logger.warning("When solving the FIPE Oracle problem, no solution was found.")
-            return []
+    def separate(self, active):
+        X = []
+        nc = self.tree_ensemble.n_classes
+        for c1 in range(nc):
+            for c2 in range(nc):
+                if c1 == c2:
+                    continue
+        
+                self.add(active, c1, c2)
+                self.optimize()
+                
+                if self.gurobi_model.SolCount == 0:
+                    logger.warning("When solving the FIPE Oracle problem, no solution was found.")
+                    continue
+                
+                Xi = self.get_all()
+                
+                X.extend(Xi)
+                self.reset()
+        return self.to_array(X)
 
-        solutions = []
+    def get_binary_values(self, x):
         feature_encoder = self.feature_encoder
+        for f in feature_encoder.binary_features:
+            x[f] = self.binary_vars[f].Xn > 0.5
+
+    def get_discrete_values(self, x):
+        feature_encoder = self.feature_encoder
+        for f in feature_encoder.discrete_features:
+            values = feature_encoder.values[f]
+            j = 0
+            while j < len(values) and self.discrete_vars[f, j].Xn > 0.5:
+                j += 1
+            assert j < len(values)
+            x[f] = values[j-1]
+    
+    def get_continuous_values(self, x):
+        feature_encoder = self.feature_encoder
+        for f in feature_encoder.continuous_features:
+            levels = self.tree_ensemble.numerical_levels[f]
+            j = 0
+            while j < len(levels)-1 and self.continuous_vars[f, j].Xn > 0.5:
+                j += 1
+            if j == len(levels)-1:
+                x[f] = levels[j]
+            else:
+                x[f] = (levels[j-1] + levels[j]) / 2.0
+
+    def get_categorical_values(self, x):
+        feature_encoder = self.feature_encoder
+        for f in feature_encoder.categorical_features:
+            categories = feature_encoder.categories[f]
+            for c in categories:
+                x[c] = self.categorical_vars[c].Xn > 0.5
+
+    def get_feature_values(self):
+        x = dict()
+        self.get_binary_values(x)
+        self.get_discrete_values(x)
+        self.get_continuous_values(x)
+        self.get_categorical_values(x)
+        return x
+
+    def to_array(self, x):
+        cols = self.feature_encoder.columns
+        if not isinstance(x, list):
+            x = [x]
+        return pd.DataFrame(x, columns=cols).values
+
+    def check_solution(self):
+        x = self.get_feature_values()
+        x = self.to_array(x)
+        
+        # Check if the path in the tree is correct.
+        tree_ensemble = self.tree_ensemble
+        E = tree_ensemble.ensemble_model
+        
+        for t, tree in enumerate(tree_ensemble):
+            e = E[t]
+            path = e.decision_path([x])
+
+    def get_all(self, check=True):
+        X = []
+        c1 = self.c1
+        c2 = self.c2
+        wm = self.weights.min()
+        eps = self.eps
+        cutoff = (wm * eps if c1 < c2 else 0.0)
         for i in range(self.gurobi_model.SolCount):
-            self.gurobi_model.setParam(GRB.Param.SolutionNumber, i)
+            self.set_gurobi_parameter("SolutionNumber", i)
+            if check:
+                self.check_solution()
+
             obj = self.gurobi_model.PoolObjVal
             if obj < cutoff:
                 continue
 
-            solution = dict()
-            for f in feature_encoder.binary_features:
-                solution[f] = self.binary_vars[f].Xn > 0.5
-            for f in feature_encoder.discrete_features:
-                values = feature_encoder.values[f]
-                j = 0
-                while j < len(values) and self.discrete_vars[f, j].Xn > 0.5:
-                    j += 1
-            
-                assert j < len(values)
-                solution[f] = values[j-1]
-        
-            for f in feature_encoder.continuous_features:
-                levels = self.tree_ensemble.numerical_levels[f]
-                j = 0
-                while j < len(levels)-1 and self.continuous_vars[f, j].Xn > 0.5:
-                    j += 1
-                if j == len(levels)-1:
-                    solution[f] = levels[j]
-                else:
-                    solution[f] = (levels[j-1] + levels[j]) / 2.0
-
-            for f in feature_encoder.categorical_features:
-                categories = feature_encoder.categories[f]
-                for c in categories:
-                    solution[c] = self.categorical_vars[c].Xn > 0.5
-            solutions.append(solution)
-        cols = feature_encoder.columns
-        return pd.DataFrame(solutions, columns=cols).values
+            x = self.get_feature_values()
+            X.append(x)
+        return X
 
 class FIPEPrunerFull:
     pruner: FIPEPruner
     oracle: FIPEOracle
     max_iter: int
 
-    def __init__(self, E, w, feature_encoder, **kwargs):
-        tree_ensemble = TreeEnsemble(E, feature_encoder, **kwargs)
-        self.pruner = FIPEPruner(E, w, **kwargs)
-        self.oracle = FIPEOracle(feature_encoder, tree_ensemble, w, **kwargs)
+    def __init__(
+        self,
+        ensemble_model,
+        weights,
+        feature_encoder: FeatureEncoder,
+        **kwargs
+    ):
+        tree_ensemble = TreeEnsemble(ensemble_model, feature_encoder, **kwargs)
+        self.pruner = FIPEPruner(ensemble_model, weights, **kwargs)
+        self.oracle = FIPEOracle(feature_encoder, tree_ensemble, weights, **kwargs)
         self.max_iter = kwargs.get("max_iter", 100)
 
     def build(self):
@@ -600,28 +670,21 @@ class FIPEPrunerFull:
         
         # Call the FIPE Oracle
         active = deepcopy(self.pruner.active)
-        n_classes = self.oracle.tree_ensemble.n_classes
         
         it = 0
         while True:
-            for c1 in range(n_classes):
-                for c2 in range(n_classes):
-                    if c1 == c2:
-                        continue
+            X = self.oracle.separate(active)
+            flag = (len(X) > 0)
 
-                    self.oracle.add_active(active, c1, c2)
-                    self.oracle.optimize()
-                    X = self.oracle.get_solutions()
-                    if len(X) == 0:
-                        continue
-                    self.pruner.add_constraints(X)
-                    self.oracle.reset()
-            
-            self.pruner.prune()
+            if flag:
+                self.pruner.add_constraints(X)
+                self.pruner.prune()
+
             if np.isclose(active, self.pruner.active).all():
                 break
 
-            active = self.pruner.active
+            active = deepcopy(self.pruner.active)
             it += 1
             if it >= self.max_iter:
-                break 
+                print("Maximum number of iterations reached.")
+                break
