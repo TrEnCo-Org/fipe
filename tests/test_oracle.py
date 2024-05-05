@@ -1,54 +1,51 @@
-from pathlib import Path
-
-import pandas as pd
 import numpy as np
-
-from fipe import FeatureEncoder, FIPEOracle, TreeEnsemble
-
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+import unittest
 
-import logging
-
-logging.basicConfig(level=logging.DEBUG)
-
-dataset = 'Breast-Cancer-Wisconsin'
-dataset_path = Path(__file__).parent / dataset
-
-print(dataset_path)
-
-data = pd.read_csv(dataset_path / f'{dataset}.full.csv')
-target = data.iloc[:, -1]
-data = data.iloc[:, :-1]
-
-f = open(dataset_path / f'{dataset}.featurelist.csv')
-features = f.read().split(',')[:-1]
-f.close()
+from fipe import FeatureEncoder, FIPEOracle, TreeEnsemble
+from tests.utils import read_dataset
 
 
-encoder = FeatureEncoder()
-encoder.fit(data)
+class TestOracle(unittest.TestCase):
+    # Setup test
+    dataset = 'Breast-Cancer-Wisconsin'
+    data, y, _ = read_dataset(dataset)
 
-X = encoder.X.values
-y = target.astype('category').cat.codes
-y = y.values
+    # Encode features
+    encoder = FeatureEncoder()
+    encoder.fit(data)
+    X = encoder.X.values
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42)
+    # Train random forest
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42)
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(X_train, y_train)
 
-rf = RandomForestClassifier(n_estimators=100, random_state=42)
-rf.fit(X_train, y_train)
+    def test_oracle_fails_with_all_active(self):
+        w = np.ones(len(self.rf))
+        tree_ensemble = TreeEnsemble(self.rf, self.encoder)
+        # Build oracle
+        oracle = FIPEOracle(self.encoder,
+                            tree_ensemble=tree_ensemble,
+                            weights=w)
+        oracle.build()
+        # Separate with all trees selected
+        active_trees = np.ones(len(self.rf))
+        X = oracle.separate(active_trees)
+        self.assertTrue(len(X) == 0)
 
-w = np.ones(len(rf))
-
-tree_ensemble = TreeEnsemble(rf, encoder)
-
-fipe_oracle = FIPEOracle(encoder, tree_ensemble=tree_ensemble, weights=w)
-
-fipe_oracle.build()
-
-u = np.ones(len(rf))
-
-X = fipe_oracle.separate(u)
-
-print(X)
+    def test_oracle_succeeds_with_single_tree(self):
+        w = np.ones(len(self.rf))
+        tree_ensemble = TreeEnsemble(self.rf, self.encoder)
+        # Build oracle
+        oracle = FIPEOracle(self.encoder,
+                            tree_ensemble=tree_ensemble,
+                            weights=w)
+        oracle.build()
+        # Separate with all trees selected
+        active_trees = np.zeros(len(self.rf))
+        active_trees[0] = 1
+        X = oracle.separate(active_trees)
+        self.assertTrue(len(X) > 0)
