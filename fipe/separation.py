@@ -608,7 +608,6 @@ def add_prob_vars(
         var = model.addVar(
             vtype=GRB.CONTINUOUS,
             lb=0.0,
-            ub=1.0,
             name=f"{name}_{c}"
         )
         prob_vars[c] = var
@@ -661,7 +660,7 @@ def add_prob_objective(
     c2: int
 ):
     model.setObjective(
-        prob_vars[c1] - prob_vars[c2],
+        prob_vars[c2] - prob_vars[c1],
         GRB.MAXIMIZE
     )
 
@@ -1231,7 +1230,7 @@ class FIPEOracle:
         eps = self.eps
         add_majority_class(
             self.gurobi_model,
-            self.active_prob_vars, mc, wm * eps,
+            self.prob_vars, mc, wm * eps,
             self.majority_class_constraints,
             name="majority_class"
         )

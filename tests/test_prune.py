@@ -58,7 +58,7 @@ class TestFullPruner(unittest.TestCase):
         w = np.ones(len(self.rf))
         full_pruner = FIPEPrunerFull(self.rf, w,
                                      self.ilf, self.encoder,
-                                     max_iter=3)
+                                     max_iter=3, tol=1e-8)
         full_pruner.build()
         full_pruner.add_points(self.X_test)
         full_pruner.prune()

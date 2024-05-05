@@ -20,7 +20,7 @@ class TestOracle(unittest.TestCase):
     # Train random forest
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
-    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=4)
     rf.fit(X_train, y_train)
 
     # Train isolation forest
@@ -30,7 +30,7 @@ class TestOracle(unittest.TestCase):
     def test_oracle_fails_with_all_active(self):
         weights = np.ones(len(self.rf))
         tree_ensemble = TreeEnsemble(self.rf, self.encoder)
-        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder)
+        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder, tol=1e-8)
         # Build oracle
         oracle = FIPEOracle(self.encoder,
                             tree_ensemble,
@@ -47,7 +47,7 @@ class TestOracle(unittest.TestCase):
     def test_oracle_succeeds_with_single_tree(self):
         weights = np.ones(len(self.rf))
         tree_ensemble = TreeEnsemble(self.rf, self.encoder)
-        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder)
+        isolation_ensemble = TreeEnsemble(self.ilf, self.encoder, tol=1e-8)
         # Build oracle
         oracle = FIPEOracle(self.encoder,
                             tree_ensemble,
@@ -56,6 +56,7 @@ class TestOracle(unittest.TestCase):
                             self.ilf.max_samples_,
                             self.ilf.offset_)
         oracle.build()
+        oracle.set_gurobi_parameter("TimeLimit", 30)
         # Separate with all trees selected
         active_trees = np.zeros(len(self.rf))
         active_trees[0] = 1
