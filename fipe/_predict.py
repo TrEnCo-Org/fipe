@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+
 def predict_single_proba_(e, X):
     """
     Predict the class probabilities of each sample in X
@@ -22,6 +23,7 @@ def predict_single_proba_(e, X):
     p = np.eye(k)[q]
 
     return p
+
 
 def predict_single_proba(E, X):
     """
@@ -43,7 +45,8 @@ def predict_single_proba(E, X):
     # We want to swap the axes to have the shape
     # (n_samples, n_estimators, n_classes).
     p = np.swapaxes(p, 0, 1)
-    return p    
+    return p
+
 
 def predict_proba(E, X, w):
     """
@@ -53,6 +56,7 @@ def predict_proba(E, X, w):
     w = np.array(w)
     p = predict_single_proba(E, X)
     return np.average(p, axis=1, weights=w)
+
 
 def predict(E, X, w):
     """
