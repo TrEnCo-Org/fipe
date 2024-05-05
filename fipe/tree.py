@@ -161,9 +161,10 @@ class TreeEnsemble(Iterable[Tree]):
                     levels.add(tree.threshold[n])
             levels.add(feature_encoder.upper_bounds[f])
             if len(levels) == 2:
-                warnings.warn(
-                    f"The feature {f} is not used in any split."
-                )
+                msg = (f"The feature {f} is not used in any split."
+                       " It will be ignored.")
+                warnings.warn(msg)
+
             levels = list(sorted(levels))
             if np.diff(levels).min() < self.tol:
                 msg = (f"The levels of the feature {f}"
