@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Youssouf Emie", email = "youssouf.emine@polymtl.ca"}
+    {name = "Youssouf Emine", email = "youssouf.emine@polymtl.ca"}
 ]
 
 classifiers = [
