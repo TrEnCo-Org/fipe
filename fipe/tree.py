@@ -1,11 +1,14 @@
 from collections.abc import Iterable, Iterator
 
 import numpy as np
-import warnings
 
 from .encoding import FeatureEncoder
 
+import warnings
+
+
 Node = int
+
 
 class Tree(Iterable[Node]):
     root: Node
@@ -20,14 +23,14 @@ class Tree(Iterable[Node]):
     threshold: dict[Node, float]
     category: dict[Node, str]
     prob: dict[Node, np.ndarray]
-    
+
     def __init__(
         self,
         tree,
         feature_encoder: FeatureEncoder
     ):
         self.tree = tree
-        
+
         self.root = 0
         self.n_nodes = tree.node_count
         self.max_depth = tree.max_depth
@@ -40,28 +43,28 @@ class Tree(Iterable[Node]):
         self.threshold = dict()
         self.category = dict()
         self.prob = dict()
-        
+
         self.parse_tree(tree, feature_encoder)
 
     def nodes_at_depth(
         self,
         d: int,
         with_leaves: bool = False
-    ) -> Iterator[Node]:
-        return iter(
-            n for n, depth in self.node_depth.items()
-            if (depth == d and
-                (with_leaves
-                 or n in self.internal_nodes)
-            )
-        )
+    ) -> set[Node]:
+        def fn(n):
+            if not (self.node_depth[n] == d):
+                return False
+            is_leaf = (n in self.leaves)
+            return with_leaves or not is_leaf
+        return set(filter(fn, self))
 
     def node_split_on(
         self,
         feature: str
     ) -> set[Node]:
-        return set(n for n in self.internal_nodes
-                   if self.feature[n] == feature)
+        def fn(n):
+            return self.feature[n] == feature
+        return set(filter(fn, self.internal_nodes))
 
     def __iter__(self) -> Iterator[Node]:
         return iter(range(self.n_nodes))
@@ -76,9 +79,9 @@ class Tree(Iterable[Node]):
     ):
         def dfs(n, d):
             self.node_depth[n] = d
-            l = tree.children_left[n]
-            r = tree.children_right[n]
-            if l == r:
+            left = tree.children_left[n]
+            right = tree.children_right[n]
+            if left == right:
                 self.leaves.add(n)
                 v = tree.value[n].flatten()
                 p = v / v.sum()
@@ -89,21 +92,22 @@ class Tree(Iterable[Node]):
             else:
                 f = tree.feature[n]
                 f: str = feature_encoder.columns[f]
-                
+
                 if f in feature_encoder.inverse_categories:
                     self.category[n] = f
                     f = feature_encoder.inverse_categories[f]
 
                 self.feature[n] = f
-                
+
                 if f in feature_encoder.numerical_features:
                     self.threshold[n] = tree.threshold[n]
 
-                self.left[n], self.right[n] = l, r
+                self.left[n], self.right[n] = left, right
                 self.internal_nodes.add(n)
-                dfs(l, d + 1)
-                dfs(r, d + 1)
+                dfs(left, d + 1)
+                dfs(right, d + 1)
         dfs(self.root, 0)
+
 
 class TreeEnsemble(Iterable[Tree]):
     n_trees: int
@@ -125,7 +129,7 @@ class TreeEnsemble(Iterable[Tree]):
         ]
         self.numerical_levels = dict()
         self.tol = kwargs.get("tol", 1e-4)
-        
+
         self.parse_numerical_levels(feature_encoder)
 
     @property
@@ -162,7 +166,7 @@ class TreeEnsemble(Iterable[Tree]):
                 )
             levels = list(sorted(levels))
             if np.diff(levels).min() < self.tol:
-                warnings.warn(
-                    f"The levels of the feature {f} are too close to each other."
-                )
+                msg = (f"The levels of the feature {f}"
+                       " are too close to each other.")
+                warnings.warn(msg)
             self.numerical_levels[f] = list(sorted(levels))
