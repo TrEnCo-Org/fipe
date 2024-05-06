@@ -10,7 +10,7 @@ from sklearn.ensemble._iforest import _average_path_length  # type: ignore
 
 from .tree import TreeEnsemble
 from .encoding import FeatureEncoder
-from ._predict import predict_proba
+from .utils import predict_proba
 from .typing import numeric
 
 import logging

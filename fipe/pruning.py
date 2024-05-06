@@ -8,7 +8,7 @@ from gurobipy import GRB
 
 from sklearn.ensemble import IsolationForest
 
-from ._predict import (
+from .utils import (
     predict_single_proba,
     predict
 )

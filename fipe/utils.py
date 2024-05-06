@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
-def predict_single_proba_(e, X):
+def predict_proba_simple(e, X):
     """
     Predict the class probabilities of each sample in X
     according to the estimator e.
@@ -37,7 +37,7 @@ def predict_single_proba(E, X):
         X = X.reshape(1, -1)
 
     p = np.stack([
-        predict_single_proba_(e, X)
+        predict_proba_simple(e, X)
         for e in E
     ])
 

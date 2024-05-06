@@ -5,7 +5,7 @@ from .pruning import (
     FIPEPrunerFull
 )
 from .typing import FeatureType
-from ._predict import (
+from .utils import (
     predict_single_proba,
     predict_proba,
     predict
