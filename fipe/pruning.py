@@ -111,6 +111,7 @@ class FIPEPrunerFull(BasePruner):
     pruner: FIPEPruner
     oracle: FIPEOracle
     max_iter: int
+    iteration: int
 
     def __init__(
         self,
@@ -157,7 +158,7 @@ class FIPEPrunerFull(BasePruner):
         self.pruner.prune()
         active = deepcopy(self.pruner.active)
 
-        it = 0
+        self.iteration = 0
         while True:
             X = self.oracle.separate(active)
             found_counterfactual = (len(X) > 0)
@@ -172,8 +173,8 @@ class FIPEPrunerFull(BasePruner):
                 break
 
             active = deepcopy(self.pruner.active)
-            it += 1
-            if it >= self.max_iter:
+            self.iteration += 1
+            if self.iteration >= self.max_iter:
                 msg = "Maximum number of iterations reached."
                 logger.info(msg)
                 break
