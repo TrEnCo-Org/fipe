@@ -125,10 +125,12 @@ def add_tree_ensemble_vars_and_constraints(
     prefix_sep: str = "_"
 ):
     add_tree_ensemble_flow_vars(
-        model, tree_ensemble, flow_vars, name=f"{prefix}{prefix_sep}flow"
+        model, tree_ensemble, flow_vars,
+        name=f"{prefix}{prefix_sep}flow"
     )
     add_tree_ensemble_branch_vars(
-        model, tree_ensemble, branch_vars, name=f"{prefix}{prefix_sep}branch"
+        model, tree_ensemble, branch_vars,
+        name=f"{prefix}{prefix_sep}branch"
     )
     add_tree_ensemble_root_constraints(
         model, tree_ensemble, flow_vars, root_constraints,
