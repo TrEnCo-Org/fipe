@@ -13,12 +13,9 @@ class Ensemble(Iterable[Tree]):
     def __init__(
         self,
         base: BaseEnsemble,
-        features: Features,
-        **kwargs
+        features: Features
     ):
         self.base = base
-        self.numerical_levels = dict()
-        self.tol = kwargs.get("tol", 1e-4)
         self._parse_trees(features)
 
     @property
@@ -31,7 +28,7 @@ class Ensemble(Iterable[Tree]):
 
     @property
     def max_depth(self) -> int:
-        return max(tree.max_depth for tree in self.trees)
+        return max(tree.max_depth for tree in self)
 
     def __iter__(self) -> Iterator[Tree]:
         return iter(self.trees)

@@ -21,22 +21,26 @@ class EnsembleParser:
         ensembles: list[Ensemble],
         features: Features
     ):
-        for f in features.continuous:
+        for feature in features.continuous:
             levels = set()
-            levels.add(features.lower_bounds[f])
-            levels.add(features.upper_bounds[f])
+            levels.add(features.lower_bounds[feature])
+            levels.add(features.upper_bounds[feature])
             for ensemble in ensembles:
-                levels |= self.get_levels(f, ensemble)
+                levels |= self.get_levels(feature, ensemble)
             levels = list(sorted(levels))
             if np.diff(levels).min() < self.tol:
-                msg = (f"The levels of the feature {f}"
+                msg = (f"The levels of the feature {feature}"
                        " are too close to each other.")
                 warnings.warn(msg)
-            self.levels[f] = levels
+            self.levels[feature] = levels
 
-    def get_levels(self, f: str, ensemble: Ensemble):
+    def get_levels(
+        self,
+        feature: str,
+        ensemble: Ensemble
+    ):
         levels = set()
         for tree in ensemble:
-            for n in tree.nodes_split_on(f):
+            for n in tree.nodes_split_on(feature):
                 levels.add(tree.threshold[n])
         return levels

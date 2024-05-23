@@ -8,7 +8,6 @@ from sklearn.tree._tree import Tree as _Tree
 from .features import Features
 
 
-# Node type is int
 Node = int
 
 
@@ -99,7 +98,7 @@ class Tree(Iterable[Node]):
 
         Parameters:
         ------------
-        d: int
+        depth: int
             The depth of the nodes.
         with_leaves: bool
             Whether to include leaf nodes.

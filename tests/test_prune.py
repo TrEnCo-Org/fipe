@@ -19,7 +19,7 @@ def get_pruner(base, X, weights):
 def get_full_pruner(base, features, X, weights):
     pruner = FullPruner(base, weights, features)
     pruner.build()
-    pruner.set_gurobi_param("OutputFlag", 1)
+    pruner.set_gurobi_param("OutputFlag", 0)
     pruner.oracle.set_gurobi_param("OutputFlag", 0)
     pruner.add_sample_constrs(X)
     pruner.prune()
@@ -67,7 +67,7 @@ class TestFullPruner(unittest.TestCase):
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.05, random_state=42)
     rf = RandomForestClassifier(
-        n_estimators=100,
+        n_estimators=10,
         random_state=42,
         max_depth=5
     )
@@ -88,8 +88,11 @@ class TestFullPruner(unittest.TestCase):
             self.X_train,
             w
         )
-        print(pruner.pruned_weights)
-        self.assertTrue(False)
+        pruned_weights = np.array([
+            pruner.pruned_weights[t]
+            for t in range(len(self.rf))
+        ])
+        self.assertEqual(np.sum(pruned_weights), 10)
 
 
 if __name__ == '__main__':

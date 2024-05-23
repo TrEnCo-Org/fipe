@@ -11,14 +11,8 @@ class IsolationEnsemble(Ensemble):
     def __init__(
         self,
         isolation_forest: IsolationForest,
-        features: Features,
-        **kwargs
+        features: Features
     ):
-        super().__init__(
-            isolation_forest,
-            features,
-            **kwargs
-        )
-
+        Ensemble.__init__(self, isolation_forest, features)
         self.max_samples = isolation_forest.max_samples_
         self.offset = isolation_forest.offset_
