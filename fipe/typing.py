@@ -1,6 +1,7 @@
 from enum import Enum
 
 numeric = int | float
+Sample = dict[str, numeric]
 
 
 class FeatureType(Enum):
