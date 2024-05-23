@@ -2,9 +2,9 @@ import numpy as np
 import unittest
 from sklearn.ensemble import RandomForestClassifier
 
-from fipe import FeatureEncoder
+from fipe import Features
 from fipe import predict_single_proba, predict_proba, predict
-from tests.utils import read_dataset
+from utils import read_dataset
 
 
 class TestPredict(unittest.TestCase):
@@ -12,12 +12,15 @@ class TestPredict(unittest.TestCase):
     dataset = 'Breast-Cancer-Wisconsin'
     data, y, _ = read_dataset(dataset)
     # Encode features
-    encoder = FeatureEncoder()
-    encoder.fit(data)
-    X = encoder.X.values
+    features = Features()
+    features.fit(data)
+    X = features.X.values
     x_0 = X[0]
     # Train random forest
-    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42
+    )
     rf.fit(X, y)  # type: ignore
 
     def test_predict_single_proba(self):
@@ -78,3 +81,7 @@ class TestPredict(unittest.TestCase):
         self.assertEqual(len(classs), 1)
         self.assertTrue(classs in [0, 1])
         self.assertTrue(classs[0] in [0, 1])
+
+
+if __name__ == '__main__':
+    unittest.main()

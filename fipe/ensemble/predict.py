@@ -1,12 +1,14 @@
 import numpy as np
 
+from sklearn.ensemble._base import BaseEnsemble
+
 import logging
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
-def predict_proba_simple(e, X):
+def predict_proba_base(e, X):
     """
     Predict the class probabilities of each sample in X
     according to the estimator e.
@@ -25,7 +27,7 @@ def predict_proba_simple(e, X):
     return p
 
 
-def predict_single_proba(E, X):
+def predict_single_proba(E: BaseEnsemble, X):
     """
     Predict the class probabilities of each sample in X
     according to each estimator in the ensemble E.
@@ -36,10 +38,9 @@ def predict_single_proba(E, X):
         # with a single row.
         X = X.reshape(1, -1)
 
-    p = np.stack([
-        predict_proba_simple(e, X)
-        for e in E
-    ])
+    def fn(e):
+        return predict_proba_base(e, X)
+    p = np.stack(list(map(fn, E)))
 
     # The shape of p is (n_estimators, n_samples, n_classes).
     # We want to swap the axes to have the shape
@@ -48,7 +49,7 @@ def predict_single_proba(E, X):
     return p
 
 
-def predict_proba(E, X, w):
+def predict_proba(E: BaseEnsemble, X, w):
     """
     Predict the score of each sample in X
     according to the ensemble E.
@@ -58,7 +59,7 @@ def predict_proba(E, X, w):
     return np.average(p, axis=1, weights=w)
 
 
-def predict(E, X, w):
+def predict(E: BaseEnsemble, X, w):
     """
     Predict the class of each sample in X using
     the model ensemble E and the weights w.

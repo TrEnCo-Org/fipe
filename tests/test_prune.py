@@ -3,8 +3,27 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 import unittest
 
-from fipe import FeatureEncoder, FIPEPruner, FIPEPrunerFull
-from tests.utils import read_dataset
+from fipe import Features, Pruner, FullPruner
+from utils import read_dataset
+
+
+def get_pruner(base, X, weights):
+    pruner = Pruner(base, weights)
+    pruner.build()
+    pruner.set_gurobi_param("OutputFlag", 0)
+    pruner.add_sample_constrs(X)
+    pruner.prune()
+    return pruner
+
+
+def get_full_pruner(base, features, X, weights):
+    pruner = FullPruner(base, weights, features)
+    pruner.build()
+    pruner.set_gurobi_param("OutputFlag", 1)
+    pruner.oracle.set_gurobi_param("OutputFlag", 0)
+    pruner.add_sample_constrs(X)
+    pruner.prune()
+    return pruner
 
 
 class TestPruner(unittest.TestCase):
@@ -12,27 +31,27 @@ class TestPruner(unittest.TestCase):
     data, y, _ = read_dataset(dataset)
 
     # Encode features
-    encoder = FeatureEncoder()
-    encoder.fit(data)
-    X = encoder.X.values
+    features = Features()
+    features.fit(data)
+    X = features.X.values
 
     # Train random forest
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.05, random_state=42)
-    rf = RandomForestClassifier(n_estimators=50, random_state=42)
+    rf = RandomForestClassifier(
+        n_estimators=50,
+        random_state=42
+    )
     rf.fit(X_train, y_train)
 
     def test_prune(self):
         w = np.ones(len(self.rf))
-        pruner = FIPEPruner(self.rf, w)
-        pruner.build()
-        pruner.add_constraints(self.X_test)
-        pruner.prune()
-        # Read solution
-        active_trees = pruner.active
-        self.assertEqual(len(active_trees), len(self.rf))
-        self.assertTrue(set([0, 1]).issuperset(set(active_trees)))
-        self.assertGreaterEqual(np.sum(active_trees), 1)
+        pruner = get_pruner(self.rf, self.X_train, w)
+        pruned_weights = np.array([
+            pruner.pruned_weights[t]
+            for t in range(len(self.rf))
+        ])
+        self.assertGreaterEqual(np.sum(pruned_weights), 1)
 
 
 class TestFullPruner(unittest.TestCase):
@@ -40,32 +59,38 @@ class TestFullPruner(unittest.TestCase):
     data, y, _ = read_dataset(dataset)
 
     # Encode features
-    encoder = FeatureEncoder()
-    encoder.fit(data)
-    X = encoder.X.values
+    features = Features()
+    features.fit(data)
+    X = features.X.values
 
     # Train random forest
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.05, random_state=42)
-    rf = RandomForestClassifier(n_estimators=20, random_state=42)
+    rf = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42,
+        max_depth=5
+    )
     rf.fit(X_train, y_train)
 
     # Train isolation forest
-    ilf = IsolationForest(n_estimators=50, contamination=0.1)
+    ilf = IsolationForest(
+        n_estimators=50,
+        contamination=0.1
+    )
     ilf.fit(X_train)
 
     def test_prune(self):
         w = np.ones(len(self.rf))
-        full_pruner = FIPEPrunerFull(self.rf, w,
-                                     self.ilf, self.encoder,
-                                     max_iter=3, tol=1e-8)
-        full_pruner.build()
-        full_pruner.add_points(self.X_test)
-        full_pruner.prune()
+        pruner = get_full_pruner(
+            self.rf,
+            self.features,
+            self.X_train,
+            w
+        )
+        print(pruner.pruned_weights)
+        self.assertTrue(False)
 
-        # Read solution
-        active_trees = full_pruner.pruner.active
-        self.assertEqual(len(active_trees), len(self.rf))
-        self.assertTrue(set([0, 1]).issuperset(set(active_trees)))
-        self.assertGreaterEqual(np.sum(active_trees), 1)
-        self.assertLessEqual(np.sum(active_trees), len(self.rf)-1)
+
+if __name__ == '__main__':
+    unittest.main()

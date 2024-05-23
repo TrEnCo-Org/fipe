@@ -1,26 +1,32 @@
-from .encoding import FeatureEncoder
-from .pruning import (
-    FIPEPruner,
-    FIPEOracle,
-    FIPEPrunerFull
-)
-from .typing import FeatureType
-from .utils import (
+from .ensemble import (
+    Features,
+    Node,
+    Tree,
+    Ensemble,
+    IsolationEnsemble,
     predict_single_proba,
     predict_proba,
     predict
 )
-from .tree import TreeEnsemble, Tree
+
+from .typing import FeatureType
+from .mip import (
+    Pruner,
+    FullPruner,
+    Oracle
+)
 
 __all__ = [
-    'FIPEPruner',
-    'FIPEOracle',
-    'FIPEPrunerFull',
-    'FeatureEncoder',
-    'TreeEnsemble',
+    'FeatureType',
+    'Features',
+    'Node',
     'Tree',
+    'Ensemble',
+    'IsolationEnsemble',
     'predict_single_proba',
     'predict_proba',
     'predict',
-    'FeatureType',
+    'Pruner',
+    'FullPruner',
+    'Oracle'
 ]

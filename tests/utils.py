@@ -1,11 +1,16 @@
 from pathlib import Path
 import pandas as pd
 
+import logging
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 
 def read_dataset(dataset: str):
     """Read dataset and return features and labels."""
     dataset_path = Path(__file__).parent / dataset
-    print("Loading dataset:", dataset_path)
+    logger.info("Loading dataset:", dataset_path)
 
     data = pd.read_csv(dataset_path / f'{dataset}.full.csv')
 
