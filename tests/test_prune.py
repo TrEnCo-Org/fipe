@@ -10,7 +10,7 @@ from utils import read_dataset
 def get_pruner(base, X, weights):
     pruner = Pruner(base, weights)
     pruner.build()
-    pruner.set_gurobi_param("OutputFlag", 0)
+    pruner.set_param("OutputFlag", 0)
     pruner.add_sample_constrs(X)
     pruner.prune()
     return pruner
@@ -19,8 +19,8 @@ def get_pruner(base, X, weights):
 def get_full_pruner(base, features, X, weights):
     pruner = FullPruner(base, weights, features)
     pruner.build()
-    pruner.set_gurobi_param("OutputFlag", 0)
-    pruner.oracle.set_gurobi_param("OutputFlag", 0)
+    pruner.set_param("OutputFlag", 0)
+    pruner.oracle.set_param("OutputFlag", 0)
     pruner.add_sample_constrs(X)
     pruner.prune()
     return pruner
@@ -47,11 +47,11 @@ class TestPruner(unittest.TestCase):
     def test_prune(self):
         w = np.ones(len(self.rf))
         pruner = get_pruner(self.rf, self.X_train, w)
-        pruned_weights = np.array([
-            pruner.pruned_weights[t]
+        pruner_weights = np.array([
+            pruner.weights[t]
             for t in range(len(self.rf))
         ])
-        self.assertGreaterEqual(np.sum(pruned_weights), 1)
+        self.assertGreaterEqual(np.sum(pruner_weights), 1)
 
 
 class TestFullPruner(unittest.TestCase):
@@ -88,11 +88,11 @@ class TestFullPruner(unittest.TestCase):
             self.X_train,
             w
         )
-        pruned_weights = np.array([
-            pruner.pruned_weights[t]
+        pruner_weights = np.array([
+            pruner.weights[t]
             for t in range(len(self.rf))
         ])
-        self.assertEqual(np.sum(pruned_weights), 10)
+        self.assertEqual(np.sum(pruner_weights), 10)
 
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+from typing import Any
 import gurobipy as gp
 import pandas as pd
 
@@ -8,41 +9,46 @@ from ..ensemble import (
 )
 
 
-class MIP:
-    model: gp.Model
+class MIP(gp.Model):
+    def __init__(
+        self,
+        name: str = "",
+        env: gp.Env | None = None
+    ):
+        gp.Model.__init__(self, name, env)
 
-    def build(self, name=""):
-        self.model = gp.Model(name)
+    def set_param(self, param, value):
+        gp.Model.setParam(self, param, value)
 
-    def set_gurobi_param(self, param, value):
-        self.model.setParam(param, value)
+    def __setattr__(self, name: str, value: Any) -> None:
+        return object.__setattr__(self, name, value)
 
 
 class EPS:
-    eps: float
+    _eps: float
 
     def __init__(self, **kwargs):
-        self.eps = kwargs.get("eps", 1.0)
+        self._eps = kwargs.get("eps", 1.0)
 
 
 class WeightedModel:
-    weights: dict[int, float]
+    _weights: dict[int, float]
 
     def __init__(self, weights):
-        self.weights = dict()
+        self._weights = dict[int, float]()
         for t, w in enumerate(weights):
-            self.weights[t] = w
+            self._weights[t] = w
 
     @property
     def min_weight(self):
-        return min(self.weights.values())
+        return min(self._weights.values())
 
 
 class FeatureContainer:
-    features: Features
+    _features: Features
 
     def __init__(self, features: Features):
-        self.features = features
+        self._features = features
 
     def transform(self, X: Sample | list[Sample]):
         if not isinstance(X, list):
@@ -53,47 +59,47 @@ class FeatureContainer:
 
     @property
     def continuous(self):
-        return self.features.continuous
+        return self._features.continuous
 
     @property
     def categorical(self):
-        return self.features.categorical
+        return self._features.categorical
 
     @property
     def binary(self):
-        return self.features.binary
+        return self._features.binary
 
     @property
     def n_features(self):
-        return self.features.n_features
+        return self._features.n_features
 
     @property
     def categories(self):
-        return self.features.categories
+        return self._features.categories
 
     @property
     def lower_bounds(self):
-        return self.features.lower_bounds
+        return self._features.lower_bounds
 
     @property
     def upper_bounds(self):
-        return self.features.upper_bounds
+        return self._features.upper_bounds
 
     @property
     def columns(self):
-        return self.features.columns
+        return self._features.columns
 
 
 class EnsembleContainer:
-    ensemble: Ensemble
+    _ensemble: Ensemble
 
     def __init__(self, ensemble: Ensemble):
-        self.ensemble = ensemble
+        self._ensemble = ensemble
 
     @property
     def n_estimators(self):
-        return self.ensemble.n_estimators
+        return self._ensemble.n_estimators
 
     @property
     def n_classes(self):
-        return self.ensemble.n_classes
+        return self._ensemble.n_classes

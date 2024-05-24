@@ -93,11 +93,11 @@ class OCEANI(
     FeatureContainer,
     EnsembleContainer
 ):
-    isolation_ensemble: IsolationEnsemble | None
+    _isolation_ensemble: IsolationEnsemble | None
 
-    feature_vars: FeatureVars
-    flow_vars: dict[int, FlowVars]
-    isolation_flow_vars: dict[int, FlowVars]
+    _feature_vars: FeatureVars
+    _flow_vars: dict[int, FlowVars]
+    _isolation_flow_vars: dict[int, FlowVars]
 
     def __init__(
         self,
@@ -105,72 +105,73 @@ class OCEANI(
         ensemble: Ensemble,
         weights,
         isolation_ensemble: IsolationEnsemble | None = None,
+        name: str = "",
+        env: gp.Env | None = None,
         **kwargs
     ):
-        MIP.__init__(self)
+        MIP.__init__(self, name, env)
         EPS.__init__(self, **kwargs)
         WeightedModel.__init__(self, weights)
         EnsembleParser.__init__(self, **kwargs)
         FeatureContainer.__init__(self, features)
         EnsembleContainer.__init__(self, ensemble)
 
-        self.isolation_ensemble = isolation_ensemble
+        self._isolation_ensemble = isolation_ensemble
         ensembles = [ensemble]
         if isolation_ensemble is not None:
             ensembles.append(isolation_ensemble)
         self.parse_levels(ensembles, features)
 
-        self.flow_vars = dict()
-        self.isolation_flow_vars = dict()
+        self._flow_vars = dict()
+        self._isolation_flow_vars = dict()
 
     def build(self):
-        MIP.build(self, name="Oracle")
         self._build_features()
         self._build_ensemble()
         self._build_isolation()
 
     def _build_features(self):
-        self.feature_vars = build_feature_vars(
-            model=self.model,
-            features=self.features,
+        self._feature_vars = build_feature_vars(
+            model=self,
+            features=self._features,
             levels=self.levels,
             categories=self.categories
         )
 
     def _build_ensemble(self):
-        for t, tree in enumerate(self.ensemble):
-            self.flow_vars[t] = build_flow_vars(
-                model=self.model,
+        for t, tree in enumerate(self._ensemble):
+            self._flow_vars[t] = build_flow_vars(
+                model=self,
                 tree=tree,
-                feature_vars=self.feature_vars,
+                feature_vars=self._feature_vars,
                 name=f"tree_{t}"
             )
 
     def _build_isolation(self):
-        if self.isolation_ensemble is None:
+        if self._isolation_ensemble is None:
             return
-        for t, tree in enumerate(self.isolation_ensemble):
-            self.isolation_flow_vars[t] = build_flow_vars(
-                model=self.model,
+        for t, tree in enumerate(self._isolation_ensemble):
+            self._isolation_flow_vars[t] = build_flow_vars(
+                model=self,
                 tree=tree,
-                feature_vars=self.feature_vars,
+                feature_vars=self._feature_vars,
                 name=f"isolation_tree_{t}"
             )
         self._add_isolation_constr()
 
     def _add_isolation_constr(self):
-        if self.isolation_ensemble is None:
+        if self._isolation_ensemble is None:
             return
         else:
-            n_estimators = self.isolation_ensemble.n_estimators
-            max_samples = self.isolation_ensemble.max_samples
+            n_estimators = self._isolation_ensemble.n_estimators
+            max_samples = self._isolation_ensemble.max_samples
             average_depth = _average_path_length([max_samples])[0]
             lhs = gp.quicksum(
-                self.isolation_flow_vars[t].weighted_depth
+                self._isolation_flow_vars[t].weighted_depth
                 for t in range(n_estimators)
             ) / (average_depth * n_estimators)
-            min_score = -np.log2(-self.isolation_ensemble.offset)
-            self.model.addConstr(
+            min_score = -np.log2(-self._isolation_ensemble.offset)
+            self.addConstr(
                 lhs >= min_score,
                 name="isolation_plausibility"
             )
@@ -211,10 +212,10 @@ class OCEANII(OCEANI):
 
     def _build_prob_vars(self):
         vars, constrs = build_weighted_prob_vars(
-            model=self.model,
-            flow_vars=self.flow_vars,
+            model=self,
+            flow_vars=self._flow_vars,
             classes=list(range(self.n_classes)),
-            weights=self.weights,
+            weights=self._weights,
         )
         self._prob_vars = vars
         self._prob_constrs = constrs
@@ -228,10 +229,10 @@ class OCEANII(OCEANI):
 
     def _add_majority_class_constr(self, c: int, k: int):
         mw = self.min_weight
-        eps = self.eps
+        eps = self._eps
         rhs = (0.0 if c < k else eps * mw)
 
-        constr = self.model.addConstr(
+        constr = self.addConstr(
             self._prob_vars[c]
             >=
             self._prob_vars[k] + rhs,
@@ -240,7 +241,7 @@ class OCEANII(OCEANI):
         self._majority_class_constrs[k] = constr
 
     def _remove_majority_class_constrs(self):
-        self.model.remove(self._majority_class_constrs)
+        self.remove(self._majority_class_constrs)
         self._majority_class_constrs = gp.tupledict()
 
 
@@ -276,8 +277,8 @@ class OCEANIII(OCEANII):
 
     def _build_activated_prob_vars(self):
         vars, constrs = build_weighted_prob_vars(
-            model=self.model,
-            flow_vars=self.flow_vars,
+            model=self,
+            flow_vars=self._flow_vars,
             classes=list(range(self.n_classes)),
             weights=self._activated_weights,
             name="activated"
@@ -286,8 +287,8 @@ class OCEANIII(OCEANII):
         self._activated_prob_constrs = constrs
 
     def _remove_activated(self):
-        self.model.remove(self._activated_prob_constrs)
-        self.model.remove(self._activated_prob_vars)
+        self.remove(self._activated_prob_constrs)
+        self.remove(self._activated_prob_vars)
         self._activated_prob_vars = gp.tupledict()
         self._activated_prob_constrs = gp.tupledict()
 
@@ -310,8 +311,8 @@ class OCEANIV(OCEANIII):
             **kwargs
         )
 
-    def add_objective(self, obj, sense):
-        self.model.setObjective(obj, sense=sense)
+    def set_objective(self, obj, sense: int | None = None):
+        self.setObjective(obj, sense=sense)
 
     def get_counters(
         self,
@@ -319,34 +320,34 @@ class OCEANIV(OCEANIII):
         check: bool = True
     ):
         param = GRB.Param.SolutionNumber
-        for i in range(self.model.SolCount):
-            self.set_gurobi_param(param, i)
-            counter = self.feature_vars.value
+        for i in range(self.SolCount):
+            self.set_param(param, i)
+            counter = self._feature_vars.value
             if check:
                 self._check_counter(counter)
             if not (cutoff == 'all'):
                 assert isinstance(cutoff, float)
                 if (
-                    self.model.ModelSense == GRB.MAXIMIZE
-                    and self.model.PoolObjVal < cutoff
+                    self.ModelSense == GRB.MAXIMIZE
+                    and self.PoolObjVal < cutoff
                 ):
                     continue
                 if (
-                    self.model.ModelSense == GRB.MINIMIZE
-                    and self.model.PoolObjVal > cutoff
+                    self.ModelSense == GRB.MINIMIZE
+                    and self.PoolObjVal > cutoff
                 ):
                     continue
             yield counter
-        self.set_gurobi_param(param, 0)
+        self.set_param(param, 0)
 
     def _check_counter(self, x: Sample):
         X = self.transform(x)
         # Check if the path is valid for each tree
         for t in range(self.n_estimators):
-            e = self.ensemble.base[t]
-            mip_path = self.flow_vars[t].path
+            e = self._ensemble.base[t]
+            mip_path = self._flow_vars[t].path
             tree_path = e.decision_path(X)
-            tree = self.ensemble[t]
+            tree = self._ensemble[t]
             node = tree.root
             while node in tree.internal_nodes:
                 left = tree.left[node]
@@ -372,10 +373,10 @@ class OCEANIV(OCEANIII):
         ])
         prob = prob / prob.sum()
         w = np.array([
-            self.weights[t]
+            self._weights[t]
             for t in range(self.n_estimators)
         ])
-        expected_prob = predict_proba(self.ensemble.base, X, w)
+        expected_prob = predict_proba(self._ensemble.base, X, w)
         if not np.allclose(prob, expected_prob):
             msg = (f"The probabilities do not match.\n"
                    f" Expected: {expected_prob}.\n"
@@ -391,7 +392,7 @@ class OCEANIV(OCEANIII):
             self._activated_weights[t]
             for t in range(self.n_estimators)
         ])
-        expected_activated_prob = predict_proba(self.ensemble.base, X, w)
+        expected_activated_prob = predict_proba(self._ensemble.base, X, w)
 
         if not np.allclose(activated_prob, expected_activated_prob):
             msg = (f"The activated probabilities do not match.\n"

@@ -47,12 +47,12 @@ class TestOracle(unittest.TestCase):
             self.weights
         )
         oracle.build()
-        oracle.set_gurobi_param("OutputFlag", 0)
+        oracle.set_param("OutputFlag", 0)
         # Separate with all trees selected
         active_trees = {
             t: 1.0 for t in range(len(self.rf))
         }
-        X = list(oracle.separate(active_trees))
+        X = list(oracle(active_trees))
         self.assertTrue(len(X) == 0)
 
     def test_oracle_succeeds_with_single_tree(self):
@@ -62,13 +62,13 @@ class TestOracle(unittest.TestCase):
             self.weights
         )
         oracle.build()
-        oracle.set_gurobi_param("OutputFlag", 0)
+        oracle.set_param("OutputFlag", 0)
         # Separate with all trees selected
         active_trees = {
             t: 1.0 for t in range(len(self.rf))
         }
         active_trees[0] = 0
-        X = list(oracle.separate(active_trees))
+        X = list(oracle(active_trees))
         self.assertTrue(len(X) > 0)
 
 
