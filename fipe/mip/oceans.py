@@ -87,7 +87,6 @@ def build_weighted_prob_vars(
 
 class OCEANI(
     MIP,
-    EPS,
     WeightedModel,
     EnsembleParser,
     FeatureContainer,
@@ -110,7 +109,6 @@ class OCEANI(
         **kwargs
     ):
         MIP.__init__(self, name, env)
-        EPS.__init__(self, **kwargs)
         WeightedModel.__init__(self, weights)
         EnsembleParser.__init__(self, **kwargs)
         FeatureContainer.__init__(self, features)
@@ -177,7 +175,10 @@ class OCEANI(
             )
 
 
-class OCEANII(OCEANI):
+class OCEANII(
+    OCEANI,
+    EPS
+):
     _prob_vars: gp.tupledict[int, gp.Var]
     _prob_constrs: gp.tupledict[int, gp.Constr]
 
@@ -199,6 +200,7 @@ class OCEANII(OCEANI):
             isolation_ensemble,
             **kwargs
         )
+        EPS.__init__(self, **kwargs)
 
     def build(self):
         OCEANI.build(self)
@@ -229,8 +231,7 @@ class OCEANII(OCEANI):
 
     def _add_majority_class_constr(self, c: int, k: int):
         mw = self.min_weight
-        eps = self._eps
-        rhs = (0.0 if c < k else eps * mw)
+        rhs = mw * self.get_cutoff(c, k)
 
         constr = self.addConstr(
             self._prob_vars[c]

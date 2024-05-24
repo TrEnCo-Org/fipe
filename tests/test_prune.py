@@ -11,7 +11,7 @@ def get_pruner(base, X, weights):
     pruner = Pruner(base, weights)
     pruner.build()
     pruner.set_param("OutputFlag", 0)
-    pruner.add_sample_constrs(X)
+    pruner.add_samples(X)
     pruner.prune()
     return pruner
 
@@ -21,7 +21,7 @@ def get_full_pruner(base, features, X, weights):
     pruner.build()
     pruner.set_param("OutputFlag", 0)
     pruner.oracle.set_param("OutputFlag", 0)
-    pruner.add_sample_constrs(X)
+    pruner.add_samples(X)
     pruner.prune()
     return pruner
 

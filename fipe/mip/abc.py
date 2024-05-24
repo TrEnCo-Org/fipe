@@ -30,6 +30,9 @@ class EPS:
     def __init__(self, **kwargs):
         self._eps = kwargs.get("eps", 1.0)
 
+    def get_cutoff(self, c: int, k: int):
+        return (self._eps if k < c else 0.0)
+
 
 class WeightedModel:
     _weights: dict[int, float]
