@@ -64,6 +64,7 @@ class Pruner(
         self._base = base
         self._activated_vars = gp.tupledict()
         self._weights_vars = gp.tupledict()
+        self._sample_constrs = gp.tupledict()
         self._continuous = kwargs.get("continuous", False)
 
     def build(self):
