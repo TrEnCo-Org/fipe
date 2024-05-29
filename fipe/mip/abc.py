@@ -17,7 +17,7 @@ class MIP(gp.Model):
     ):
         gp.Model.__init__(self, name, env)
 
-    def set_param(self, param, value):
+    def set_param(self, param: str, value: Any):
         gp.Model.setParam(self, param, value)
 
     def __setattr__(self, name: str, value: Any) -> None:

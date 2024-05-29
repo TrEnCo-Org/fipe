@@ -32,6 +32,7 @@ logger.addHandler(logging.NullHandler())
 
 
 class BasePruner(ABC):
+
     @abstractmethod
     def prune(self):
         msg = "The prune method must be implemented."
@@ -112,14 +113,18 @@ class Pruner(
 
     @property
     def n_activated(self) -> int:
+        return len(self.activated)
+
+    @property
+    def activated(self) -> list[int]:
         if self.SolCount == 0:
             logger.warning("No pruning solution found.")
-            return self.n_estimators
-        activated = np.array([
-            self._activated_vars[t].X > 0.5
+            return list(range(self.n_estimators))
+        return [
+            t
             for t in range(self.n_estimators)
-        ])
-        return int(activated.sum())
+            if self._activated_vars[t].X > 0.5
+        ]
 
     def _add_vars(self):
         if self._continuous:
