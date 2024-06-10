@@ -66,7 +66,7 @@ class Oracle(OCEANIV):
 
     def _get_pair_cutoff(self, c1: int, c2: int):
         # mw = self.min_weight
-        return self.get_cutoff(c1, c2)
+        return self.get_cutoff(c2, c1)
 
     def _get_pair_counters(
         self,
