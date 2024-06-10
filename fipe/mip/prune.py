@@ -138,7 +138,16 @@ class Pruner(
                 vtype=GRB.BINARY,
                 name=f"activated_weights_{t}"
             )
-            self._weights_vars[t] = self._activated_vars[t]
+            self._weights_vars[t] = self.addVar(
+                vtype=GRB.CONTINUOUS,
+                name=f"weight_{t}"
+            )
+            self.addConstr(
+                self._weights_vars[t]
+                ==
+                self._weights[t]
+                * self._activated_vars[t]
+            )
 
     def _add_continuous_vars(self):
         for t in range(self.n_estimators):
@@ -168,13 +177,13 @@ class Pruner(
 
     def _add_sample_constr(self, p, y: int, c: int):
         i = self._n_samples
-        mw = self.min_weight
+        # mw = self.min_weight
         self._sample_constrs[i, c] = self.addConstr(
             gp.quicksum(
                 self._weights_vars[t]
                 * (p[t, y] - p[t, c])
                 for t in range(self.n_estimators)
-            ) >= (mw * self.get_cutoff(y, c)),
+            ) >= (self.get_cutoff(y, c)),
             name=f"sample_{i}_{c}"
         )
 
