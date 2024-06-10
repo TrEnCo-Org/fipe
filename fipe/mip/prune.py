@@ -183,7 +183,7 @@ class Pruner(
                 self._weights_vars[t]
                 * (p[t, y] - p[t, c])
                 for t in range(self.n_estimators)
-            ) >= (self.get_cutoff(y, c)),
+            ) >= self.get_cutoff(y, c),
             name=f"sample_{i}_{c}"
         )
 
